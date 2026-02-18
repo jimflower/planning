@@ -32,10 +32,17 @@ export default function SettingsPage() {
       setMsalUser(user);
       // Fetch user role from server
       if (user?.email) {
+        console.log('[Settings] Fetching role for:', user.email);
         fetch(`/api/user-role/${encodeURIComponent(user.email)}`)
           .then((res) => res.json())
-          .then((data) => setUserRole(data.role || 'user'))
-          .catch(() => setUserRole('user'));
+          .then((data) => {
+            console.log('[Settings] Role fetched:', data);
+            setUserRole(data.role || 'user');
+          })
+          .catch((err) => {
+            console.error('[Settings] Failed to fetch role:', err);
+            setUserRole('user');
+          });
       }
     });
     // Load excluded users from server
@@ -230,8 +237,8 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Email Analytics Settings */}
-        {procoreConnected && (
+        {/* Email Analytics Settings - Admin/Manager Only */}
+        {procoreConnected && (userRole === 'admin' || userRole === 'manager') && (
           <div className="section-card p-4">
             <h2 className="section-header flex items-center gap-2">
               <Users className="h-5 w-5" />
@@ -239,6 +246,9 @@ export default function SettingsPage() {
             </h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
               Exclude users from the "Tomorrow's Planning Status" analytics on the Dashboard. Excluded users won't be counted in the "Not yet notified" total.
+              <span className="ml-1 font-semibold text-purple-600 dark:text-purple-400">
+                (Global setting - affects all users)
+              </span>
             </p>
             <div className="mt-4">
               {loadingUsers ? (
