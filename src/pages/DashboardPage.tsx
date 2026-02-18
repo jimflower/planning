@@ -28,8 +28,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (procoreService.isAuthenticated()) {
-      procoreService.getCompanyUsers().then((users) => {
-        setProcoreUsers(users);
+      procoreService.getCompanyUsers().then((all) => {
+        // Filter to only GNB Energy employees (same filter as crew dropdowns)
+        const employees = all.filter((u) =>
+          u.is_employee !== false &&
+          (!u.vendor || /gnb energy/i.test(u.vendor.name)),
+        );
+        setProcoreUsers(employees);
         setLoadingUsers(false);
       }).catch(() => setLoadingUsers(false));
     } else {
