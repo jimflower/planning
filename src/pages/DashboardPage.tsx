@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useEmailLogStore } from '@/store/emailLogStore';
 import { usePlanningStore } from '@/store/planningStore';
-import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen } from 'lucide-react';
+import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen, Clock, CheckCircle2, XCircle, Trash2, Loader2 } from 'lucide-react';
 
 function formatDDMMYYYY(iso: string): string {
   try {
@@ -18,6 +18,52 @@ function formatDDMMYYYY(iso: string): string {
 export default function DashboardPage() {
   const logs = useEmailLogStore((s) => s.logs);
   const history = usePlanningStore((s) => s.history);
+
+  // Pending Procore notes
+  interface PendingNote {
+    id: number;
+    plan_id: string;
+    project_id: number;
+    scheduled_date: string;
+    subject: string;
+    status: 'pending' | 'posted' | 'failed';
+    created_at: string;
+    posted_at: string | null;
+    error: string | null;
+  }
+  const [pendingNotes, setPendingNotes] = useState<PendingNote[]>([]);
+  const [loadingNotes, setLoadingNotes] = useState(true);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const fetchPendingNotes = async () => {
+    try {
+      const resp = await fetch('/api/pending-notes');
+      if (resp.ok) setPendingNotes(await resp.json());
+    } catch {
+      // silent — server may be offline
+    } finally {
+      setLoadingNotes(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingNotes();
+    // Refresh every 60 s
+    const iv = setInterval(fetchPendingNotes, 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const handleDeleteNote = async (id: number) => {
+    setDeletingId(id);
+    try {
+      const resp = await fetch(`/api/pending-notes/${id}`, { method: 'DELETE' });
+      if (resp.ok) setPendingNotes((prev) => prev.filter((n) => n.id !== id));
+    } catch {
+      // silent
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const totalSent = logs.filter((l) => l.status === 'sent').length;
   const totalFailed = logs.filter((l) => l.status === 'failed').length;
@@ -52,7 +98,7 @@ export default function DashboardPage() {
       <h1 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
 
       {/* Stat Cards */}
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-5">
         <StatCard
           icon={<ClipboardList className="h-6 w-6" />}
           label="Total Plans"
@@ -77,6 +123,91 @@ export default function DashboardPage() {
           value={uniqueProjects.size}
           colour="secondary"
         />
+        <StatCard
+          icon={<Clock className="h-6 w-6" />}
+          label="Scheduled"
+          value={pendingNotes.filter((n) => n.status === 'pending').length}
+          colour="primary"
+        />
+      </div>
+
+      {/* Scheduled Procore Updates */}
+      <div className="mb-8 section-card">
+        <div className="section-header">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <Clock className="h-4 w-4 text-primary-500" />
+            Scheduled Procore Updates
+          </h2>
+          <span className="rounded-full bg-primary-100 px-2 py-0.5 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+            {pendingNotes.filter((n) => n.status === 'pending').length} pending
+          </span>
+        </div>
+
+        {loadingNotes ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+          </div>
+        ) : pendingNotes.length === 0 ? (
+          <p className="p-4 text-sm text-gray-500">No scheduled Procore updates.</p>
+        ) : (
+          <div className="divide-y dark:divide-gray-700">
+            {pendingNotes.map((note) => (
+              <div key={note.id} className="flex items-center gap-3 px-4 py-3">
+                {/* Status icon */}
+                {note.status === 'pending' && (
+                  <Clock className="h-4 w-4 shrink-0 text-blue-500" />
+                )}
+                {note.status === 'posted' && (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                )}
+                {note.status === 'failed' && (
+                  <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+                )}
+
+                {/* Details */}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">
+                    {note.subject || `Plan ${note.plan_id.slice(0, 8)}…`}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Scheduled for {formatDDMMYYYY(note.scheduled_date)}
+                    {note.posted_at && ` · Posted ${formatDDMMYYYY(note.posted_at)}`}
+                    {note.error && ` · Error: ${note.error}`}
+                  </p>
+                </div>
+
+                {/* Status badge */}
+                <span
+                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                    note.status === 'pending'
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                      : note.status === 'posted'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                  }`}
+                >
+                  {note.status}
+                </span>
+
+                {/* Delete button (only for pending) */}
+                {note.status === 'pending' && (
+                  <button
+                    onClick={() => handleDeleteNote(note.id)}
+                    disabled={deletingId === note.id}
+                    className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                    title="Cancel scheduled update"
+                  >
+                    {deletingId === note.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
