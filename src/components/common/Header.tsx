@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils/cn';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useSettingsStore } from '@/store/settingsStore';
 import {
-  ClipboardList,
   LayoutDashboard,
   History,
   Mail,
@@ -18,6 +17,7 @@ import {
   WifiOff,
   LogOut,
   User,
+  ClipboardList,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -53,7 +53,7 @@ export function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         {/* Logo / title */}
         <Link to="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <ClipboardList className="h-6 w-6" />
+          <img src="/gnb-energy-logo.jpg" alt="GNB Energy" className="h-9 w-auto" />
           <span className="hidden sm:inline">Daily Planning Hub</span>
         </Link>
 

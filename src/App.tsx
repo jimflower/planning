@@ -7,7 +7,7 @@ import { OfflineIndicator } from '@/components/common/OfflineIndicator';
 import { useSettingsStore } from '@/store/settingsStore';
 import { usePlanningStore } from '@/store/planningStore';
 import { graphScopes } from '@/config/msalConfig';
-import { ClipboardList, LogIn, Loader2 } from 'lucide-react';
+import { LogIn, Loader2 } from 'lucide-react';
 import { procoreService } from '@/services/procore.service';
 import HomePage from '@/pages/HomePage';
 import DashboardPage from '@/pages/DashboardPage';
@@ -59,9 +59,11 @@ export default function App() {
           <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl dark:bg-gray-800">
             {/* Logo */}
             <div className="mb-6 flex flex-col items-center gap-3">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-500 text-white">
-                <ClipboardList className="h-8 w-8" />
-              </div>
+              <img
+                src="/gnb-energy-logo.jpg"
+                alt="GNB Energy"
+                className="h-24 w-auto"
+              />
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                 Daily Planning Hub
               </h1>
