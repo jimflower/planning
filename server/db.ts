@@ -65,6 +65,16 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_pending_notes_date   ON pending_procore_notes(scheduled_date);
   CREATE INDEX IF NOT EXISTS idx_pending_notes_status ON pending_procore_notes(status);
+
+  -- Server-side Procore credential storage (synced from browser)
+  CREATE TABLE IF NOT EXISTS procore_credentials (
+    user_email       TEXT PRIMARY KEY,
+    access_token     TEXT NOT NULL,
+    refresh_token    TEXT NOT NULL,
+    expires_at       INTEGER NOT NULL,       -- epoch ms
+    company_id       TEXT NOT NULL DEFAULT '',
+    updated_at       TEXT NOT NULL
+  );
 `);
 
 /* ── Types matching the frontend PlanningEmail ─────── */
@@ -248,6 +258,51 @@ export function updateNoteTokens(id: number, accessToken: string, refreshToken: 
 export function deletePendingNote(id: number): boolean {
   const result = pendingStmts.deleteById.run(id);
   return result.changes > 0;
+}
+
+/* ── Procore Credentials (server-side secure storage) ─ */
+export interface ProcoreCredentialRow {
+  user_email: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+  company_id: string;
+  updated_at: string;
+}
+
+const credStmts = {
+  upsert: db.prepare(`
+    INSERT INTO procore_credentials (user_email, access_token, refresh_token, expires_at, company_id, updated_at)
+    VALUES (@user_email, @access_token, @refresh_token, @expires_at, @company_id, @updated_at)
+    ON CONFLICT(user_email) DO UPDATE SET
+      access_token  = @access_token,
+      refresh_token = @refresh_token,
+      expires_at    = @expires_at,
+      company_id    = @company_id,
+      updated_at    = @updated_at
+  `),
+
+  getByEmail: db.prepare(`SELECT * FROM procore_credentials WHERE user_email = ?`),
+
+  getFirst: db.prepare(`SELECT * FROM procore_credentials ORDER BY updated_at DESC LIMIT 1`),
+
+  getAll: db.prepare(`SELECT * FROM procore_credentials ORDER BY updated_at DESC`),
+};
+
+export function upsertProcoreCredentials(cred: ProcoreCredentialRow): void {
+  credStmts.upsert.run(cred);
+}
+
+export function getProcoreCredentials(email: string): ProcoreCredentialRow | undefined {
+  return credStmts.getByEmail.get(email) as ProcoreCredentialRow | undefined;
+}
+
+export function getLatestProcoreCredentials(): ProcoreCredentialRow | undefined {
+  return credStmts.getFirst.get() as ProcoreCredentialRow | undefined;
+}
+
+export function getAllProcoreCredentials(): ProcoreCredentialRow[] {
+  return credStmts.getAll.all() as ProcoreCredentialRow[];
 }
 
 export default db;

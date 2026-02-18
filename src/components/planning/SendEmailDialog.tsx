@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Send, LogIn, Loader2 } from 'lucide-react';
-import { authService, type AuthUser } from '@/services/auth.service';
+import { X, Send, Loader2 } from 'lucide-react';
+import { useMsal } from '@azure/msal-react';
 import { graphService } from '@/services/graph.service';
 import { buildEmailSubject, buildEmailHtml } from '@/services/emailTemplate';
 import { usePlanningStore } from '@/store/planningStore';
@@ -24,25 +24,24 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
   const plan = usePlanningStore((s) => s.currentPlan) as PlanningEmail;
   const { users, projects } = useProcoreData();
   const addLog = useEmailLogStore((s) => s.addLog);
+  const { accounts } = useMsal();
 
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const userEmail = accounts[0]?.username ?? '';
+  const userName = accounts[0]?.name ?? userEmail;
+
   const [toField, setToField] = useState('');
   const [ccField, setCcField] = useState(ALWAYS_CC);
   const [subject, setSubject] = useState('');
   const [procoreStatus, setProcoreStatus] = useState<'idle' | 'posting' | 'success' | 'failed' | 'scheduled'>('idle');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const [signingIn, setSigningIn] = useState(false);
 
-  const configured = authService.isConfigured();
-
-  // On open: set subject, resolve crew emails, check auth
+  // On open: set subject, resolve crew emails
   useEffect(() => {
     if (!open) return;
     setError('');
     setProcoreStatus('idle');
     setSubject(buildEmailSubject(plan));
-    authService.getCurrentUser().then(setUser);
 
     // Ensure CC always includes planning@gnbenergy.com.au
     setCcField((prev) => {
@@ -78,19 +77,6 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
       }
     }
   }, [open, plan, users]);
-
-  const handleSignIn = async () => {
-    setSigningIn(true);
-    setError('');
-    try {
-      const u = await authService.signIn();
-      setUser(u);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
-    } finally {
-      setSigningIn(false);
-    }
-  };
 
   const handleSend = async () => {
     const toList = toField
@@ -130,7 +116,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
         client: plan.client,
         location: plan.location,
         crewCount: plan.crewAssignments.filter((c) => c.name).length,
-        sentBy: user?.email ?? '',
+        sentBy: userEmail,
         status: result.success ? 'sent' : 'failed',
         error: result.error,
       };
@@ -160,7 +146,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
         client: plan.client,
         location: plan.location,
         crewCount: plan.crewAssignments.filter((c) => c.name).length,
-        sentBy: user?.email ?? '',
+        sentBy: userEmail,
         status: 'failed',
         error: err instanceof Error ? err.message : 'Unknown error',
       });
@@ -243,44 +229,11 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
         </div>
 
         <div className="space-y-4 px-5 py-4">
-          {/* Not configured warning */}
-          {!configured && (
-            <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-              <strong>Azure AD not configured.</strong> Add{' '}
-              <code className="text-xs">VITE_AZURE_CLIENT_ID</code> and{' '}
-              <code className="text-xs">VITE_AZURE_TENANT_ID</code> to your{' '}
-              <code className="text-xs">.env</code> file, then reload.
-            </div>
-          )}
-
-          {/* Auth section */}
-          {configured && !user && (
-            <div className="flex flex-col items-center gap-3 rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
-              <p className="text-sm text-blue-800 dark:text-blue-300">
-                Sign in with your Microsoft 365 account to send emails.
-              </p>
-              <button
-                onClick={handleSignIn}
-                disabled={signingIn}
-                className="btn-primary flex items-center gap-2"
-              >
-                {signingIn ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                {signingIn ? 'Signing in…' : 'Sign in with Microsoft'}
-              </button>
-            </div>
-          )}
-
           {/* Signed-in indicator */}
-          {user && (
-            <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-300">
-              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-              Signed in as <strong>{user.email}</strong>
-            </div>
-          )}
+          <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-300">
+            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+            Sending as <strong>{userName}</strong> ({userEmail})
+          </div>
 
           {/* Subject */}
           <div>
@@ -362,7 +315,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
           </button>
           <button
             onClick={handleSend}
-            disabled={!user || sending || !configured}
+            disabled={sending}
             className="btn-primary flex items-center gap-2 disabled:opacity-50"
           >
             {sending ? (

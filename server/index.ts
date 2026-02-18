@@ -19,8 +19,9 @@ import {
   getAllPlans, getPlanById, upsertPlan, deletePlan, bulkUpsert,
   insertPendingNote, getAllPendingNotes, getPendingNotesByDate,
   markNotePosted, markNoteFailed, updateNoteTokens, deletePendingNote,
+  upsertProcoreCredentials, getLatestProcoreCredentials, getAllProcoreCredentials,
 } from './db.js';
-import type { PlanRow, PendingNoteRow } from './db.js';
+import type { PlanRow, PendingNoteRow, ProcoreCredentialRow } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -234,6 +235,60 @@ app.delete('/api/pending-notes/:id', (req, res) => {
   }
 });
 
+/* ── Procore Credentials (server-side secure storage) ─ */
+
+// Sync Procore tokens from browser to server
+app.post('/api/procore-credentials', (req, res) => {
+  try {
+    const body = req.body as {
+      userEmail: string;
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      companyId: string;
+    };
+
+    if (!body.userEmail || !body.accessToken) {
+      return res.status(400).json({ error: 'Missing required fields (userEmail, accessToken)' });
+    }
+
+    upsertProcoreCredentials({
+      user_email: body.userEmail,
+      access_token: body.accessToken,
+      refresh_token: body.refreshToken,
+      expires_at: body.expiresAt,
+      company_id: body.companyId ?? '',
+      updated_at: new Date().toISOString(),
+    });
+
+    console.log(`[API] Synced Procore credentials for ${body.userEmail}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] POST /api/procore-credentials error:', err);
+    res.status(500).json({ error: 'Failed to store credentials' });
+  }
+});
+
+// Get stored credentials status (no secrets exposed)
+app.get('/api/procore-credentials', (_req, res) => {
+  try {
+    const creds = getAllProcoreCredentials();
+    // Return only metadata — never expose tokens to the browser
+    res.json(
+      creds.map((c) => ({
+        userEmail: c.user_email,
+        companyId: c.company_id,
+        hasTokens: Boolean(c.access_token),
+        expiresAt: c.expires_at,
+        updatedAt: c.updated_at,
+      })),
+    );
+  } catch (err) {
+    console.error('[API] GET /api/procore-credentials error:', err);
+    res.status(500).json({ error: 'Failed to retrieve credentials' });
+  }
+});
+
 /* ── Procore cron job: posts pending notes at 00:01 AM ─ */
 
 const PROCORE_TOKEN_URL = 'https://login.procore.com/oauth/token';
@@ -243,13 +298,19 @@ const PROCORE_CLIENT_SECRET = process.env.VITE_PROCORE_CLIENT_SECRET ?? '';
 
 /**
  * Refresh Procore tokens if they're about to expire (< 5 min remaining).
- * Updates the DB row with the new tokens.
+ * Uses centrally stored credentials, falling back to per-note tokens.
  */
 async function ensureFreshTokens(note: PendingNoteRow): Promise<{ accessToken: string; refreshToken: string; expiresAt: number }> {
   const FIVE_MINS = 5 * 60 * 1000;
 
-  if (note.token_expires_at - Date.now() > FIVE_MINS) {
-    return { accessToken: note.access_token, refreshToken: note.refresh_token, expiresAt: note.token_expires_at };
+  // Prefer server-side credential store (synced from browser)
+  const serverCred = getLatestProcoreCredentials();
+  const accessToken = serverCred?.access_token ?? note.access_token;
+  const refreshToken = serverCred?.refresh_token ?? note.refresh_token;
+  const expiresAt = serverCred?.expires_at ?? note.token_expires_at;
+
+  if (expiresAt - Date.now() > FIVE_MINS) {
+    return { accessToken, refreshToken, expiresAt };
   }
 
   console.log(`[Cron] Refreshing Procore token for pending note #${note.id}…`);
@@ -257,7 +318,7 @@ async function ensureFreshTokens(note: PendingNoteRow): Promise<{ accessToken: s
     grant_type: 'refresh_token',
     client_id: PROCORE_CLIENT_ID,
     client_secret: PROCORE_CLIENT_SECRET,
-    refresh_token: note.refresh_token,
+    refresh_token: refreshToken,
   });
 
   const resp = await axios.post(PROCORE_TOKEN_URL, body, {
@@ -265,10 +326,22 @@ async function ensureFreshTokens(note: PendingNoteRow): Promise<{ accessToken: s
   });
 
   const { access_token, refresh_token, expires_in } = resp.data;
-  const newRefresh = refresh_token ?? note.refresh_token;
+  const newRefresh = refresh_token ?? refreshToken;
   const newExpires = Date.now() + expires_in * 1000;
 
+  // Update both per-note tokens and server credential store
   updateNoteTokens(note.id, access_token, newRefresh, newExpires);
+  if (serverCred) {
+    upsertProcoreCredentials({
+      ...serverCred,
+      access_token,
+      refresh_token: newRefresh,
+      expires_at: newExpires,
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`[Cron] Updated server-stored Procore credentials for ${serverCred.user_email}`);
+  }
+
   return { accessToken: access_token, refreshToken: newRefresh, expiresAt: newExpires };
 }
 
@@ -277,6 +350,7 @@ async function ensureFreshTokens(note: PendingNoteRow): Promise<{ accessToken: s
  */
 async function postPendingNote(note: PendingNoteRow): Promise<void> {
   const { accessToken } = await ensureFreshTokens(note);
+  const companyId = note.company_id || getLatestProcoreCredentials()?.company_id || '';
 
   const url = `${PROCORE_API_BASE}/rest/v1.0/projects/${note.project_id}/notes_logs`;
   await axios.post(
@@ -291,7 +365,7 @@ async function postPendingNote(note: PendingNoteRow): Promise<void> {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
-        ...(note.company_id ? { 'Procore-Company-Id': note.company_id } : {}),
+        ...(companyId ? { 'Procore-Company-Id': companyId } : {}),
       },
     },
   );

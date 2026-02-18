@@ -35,6 +35,36 @@ function getTokens(): TokenData | null {
 
 function saveTokens(data: TokenData) {
   localStorage.setItem(TOKEN_KEY, JSON.stringify(data));
+  // Auto-sync to server for cron job reliability
+  syncTokensToServer(data);
+}
+
+/**
+ * Push Procore tokens to the backend so the cron job
+ * can post scheduled notes even if the browser is closed.
+ */
+function syncTokensToServer(tokens: TokenData) {
+  // Get the current Microsoft user email (stored in MSAL cache)
+  const msalKeys = Object.keys(localStorage).filter((k) => k.includes('login.microsoftonline.com'));
+  let userEmail = '';
+  for (const key of msalKeys) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) ?? '{}');
+      if (parsed.username) { userEmail = parsed.username; break; }
+    } catch { /* ignore */ }
+  }
+
+  fetch('/api/procore-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userEmail: userEmail || 'unknown',
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: tokens.expires_at,
+      companyId: procoreConfig.companyId,
+    }),
+  }).catch((err) => console.warn('[Procore] Failed to sync tokens to server:', err));
 }
 
 function clearTokens() {
@@ -178,6 +208,12 @@ export const procoreService = {
   isAuthenticated(): boolean {
     const tokens = getTokens();
     return Boolean(tokens?.access_token);
+  },
+
+  /** Force sync current tokens to the server (call on login / page load) */
+  syncCredentials() {
+    const tokens = getTokens();
+    if (tokens) syncTokensToServer(tokens);
   },
 
   /* ── OAuth ────────────────────────────── */

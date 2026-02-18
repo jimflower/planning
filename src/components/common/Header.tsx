@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useMsal } from '@azure/msal-react';
 import { cn } from '@/lib/utils/cn';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -15,6 +16,8 @@ import {
   X,
   Wifi,
   WifiOff,
+  LogOut,
+  User,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -30,6 +33,20 @@ export function Header() {
   const online = useOnlineStatus();
   const { darkMode, toggleDarkMode } = useSettingsStore();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const { instance, accounts } = useMsal();
+
+  const activeAccount = accounts[0];
+  const displayName = activeAccount?.name ?? activeAccount?.username ?? '';
+  const initials = displayName
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  const handleSignOut = () => {
+    instance.logoutPopup({ account: activeAccount });
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-primary-600 text-white shadow-md print:hidden">
@@ -82,6 +99,26 @@ export function Header() {
             {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </button>
 
+          {/* User avatar + sign out */}
+          {activeAccount && (
+            <div className="hidden items-center gap-2 md:flex">
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-xs font-bold"
+                title={displayName}
+              >
+                {initials || <User className="h-3.5 w-3.5" />}
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-white/10"
+                title="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden lg:inline">Sign out</span>
+              </button>
+            </div>
+          )}
+
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -110,6 +147,15 @@ export function Header() {
               {label}
             </Link>
           ))}
+          {activeAccount && (
+            <button
+              onClick={handleSignOut}
+              className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium hover:bg-white/10"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out ({displayName.split(' ')[0]})
+            </button>
+          )}
         </nav>
       )}
     </header>
