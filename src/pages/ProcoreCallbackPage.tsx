@@ -32,8 +32,15 @@ export default function ProcoreCallbackPage() {
         setTimeout(() => navigate('/settings'), 1500);
       })
       .catch((err: unknown) => {
-        setStatus('error');
-        setErrorMsg(err instanceof Error ? err.message : 'Token exchange failed.');
+        // Check if tokens were actually saved despite the error
+        if (procoreService.isAuthenticated()) {
+          console.warn('[Procore] Token exchange error (but succeeded):', err);
+          setStatus('success');
+          setTimeout(() => navigate('/settings'), 1500);
+        } else {
+          setStatus('error');
+          setErrorMsg(err instanceof Error ? err.message : 'Token exchange failed.');
+        }
       });
   }, [searchParams, navigate]);
 

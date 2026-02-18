@@ -15,6 +15,8 @@ import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron';
 import axios from 'axios';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   getAllPlans, getPlanById, upsertPlan, deletePlan, bulkUpsert,
   insertPendingNote, getAllPendingNotes, getPendingNotesByDate,
@@ -23,11 +25,97 @@ import {
 } from './db.js';
 import type { PlanRow, PendingNoteRow, ProcoreCredentialRow } from './db.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT ?? 3001;
+const DIST_DIR = path.resolve(__dirname, '..', 'dist');
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+/* ── Procore proxy routes (replaces Vite dev proxy in production) ── */
+
+// Proxy middleware for /proxy/login/* and /proxy/api/*
+app.use('/proxy', async (req, res, next) => {
+  if (req.path.startsWith('/login/')) {
+    const targetPath = req.path.replace('/login/', '');
+    const targetUrl = `https://login.procore.com/${targetPath}`;
+    console.log(`[Proxy] ${req.method} ${req.path} → ${targetUrl}`);
+    console.log(`[Proxy] Request body:`, req.body);
+    
+    try {
+      const resp = await axios({
+        method: req.method as any,
+        url: targetUrl,
+        data: req.body,
+        headers: {
+          ...Object.fromEntries(
+            Object.entries(req.headers).filter(([k]) =>
+              !['host', 'connection', 'content-length'].includes(k.toLowerCase()),
+            ),
+          ),
+          host: 'login.procore.com',
+        },
+        params: req.query,
+        validateStatus: () => true,
+      });
+      
+      console.log(`[Proxy] Response status: ${resp.status}`);
+      if (resp.status >= 400) {
+        console.log(`[Proxy] Error response:`, resp.data);
+      }
+      
+      res.status(resp.status);
+      for (const [key, val] of Object.entries(resp.headers)) {
+        if (val && !['transfer-encoding', 'connection', 'content-encoding'].includes(key.toLowerCase())) {
+          res.setHeader(key, val as string);
+        }
+      }
+      res.send(resp.data);
+    } catch (err) {
+      console.error('[Proxy] login.procore.com error:', err);
+      res.status(502).json({ error: 'Proxy error' });
+    }
+  } else if (req.path.startsWith('/api/')) {
+    const targetPath = req.path.replace('/api/', '');
+    const targetUrl = `https://api.procore.com/${targetPath}`;
+    console.log(`[Proxy] ${req.method} ${req.path} → ${targetUrl}`);
+    
+    try {
+      const resp = await axios({
+        method: req.method as any,
+        url: targetUrl,
+        data: req.body,
+        headers: {
+          ...Object.fromEntries(
+            Object.entries(req.headers).filter(([k]) =>
+              !['host', 'connection', 'content-length'].includes(k.toLowerCase()),
+            ),
+          ),
+          host: 'api.procore.com',
+        },
+        params: req.query,
+        validateStatus: () => true,
+      });
+      
+      res.status(resp.status);
+      for (const [key, val] of Object.entries(resp.headers)) {
+        if (val && !['transfer-encoding', 'connection', 'content-encoding'].includes(key.toLowerCase())) {
+          res.setHeader(key, val as string);
+        }
+      }
+      res.send(resp.data);
+    } catch (err) {
+      console.error('[Proxy] api.procore.com error:', err);
+      res.status(502).json({ error: 'Proxy error' });
+    }
+  } else {
+    next();
+  }
+});
 
 /* ── Helper: convert frontend PlanningEmail → PlanRow ── */
 interface PlanningEmailPayload {
@@ -415,9 +503,27 @@ setTimeout(async () => {
   }
 }, 5000);
 
+/* ── Serve built frontend (production) ──────────────── */
+import fs from 'node:fs';
+
+if (fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
+  // Serve static assets with caching
+  app.use(express.static(DIST_DIR, { maxAge: '1d' }));
+
+  // SPA fallback: serve index.html for any non-API route
+  app.use((_req, res) => {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  });
+
+  console.log(`  📂 Serving frontend from ${DIST_DIR}`);
+} else {
+  console.warn('  ⚠️  No dist/ folder found — run "npm run build" to build the frontend');
+}
+
 /* ── Start ─────────────────────────────────────────── */
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  🗄️  Daily Planning Hub API server`);
   console.log(`  📁 Database: planning-hub.db`);
-  console.log(`  🌐 http://localhost:${PORT}/api/plans\n`);
+  console.log(`  🌐 http://0.0.0.0:${PORT}`);
+  console.log(`  🌍 Accessible from network at http://172.16.0.196:${PORT}\n`);
 });
