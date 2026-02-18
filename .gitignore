@@ -30,3 +30,6 @@ npm-debug.log*
 *.db
 *.db-wal
 *.db-shm
+
+# TypeScript build info
+*.tsbuildinfo
