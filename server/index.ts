@@ -458,9 +458,16 @@ app.delete('/api/settings/:key', (req, res) => {
 // Get current user's role
 app.get('/api/user-role/:email', (req, res) => {
   try {
-    const role = getUserRole(req.params.email);
-    // Default to 'user' if no role set
-    res.json({ email: req.params.email, role: role?.role ?? 'user' });
+    let role = getUserRole(req.params.email);
+    
+    // Auto-create user with 'user' role if they don't exist
+    if (!role) {
+      upsertUserRole(req.params.email, 'user');
+      console.log(`[API] Auto-created user role for ${req.params.email}`);
+      role = { email: req.params.email, role: 'user', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    }
+    
+    res.json({ email: req.params.email, role: role.role });
   } catch (err) {
     console.error('[API] GET /api/user-role/:email error:', err);
     res.status(500).json({ error: 'Failed to retrieve user role' });
