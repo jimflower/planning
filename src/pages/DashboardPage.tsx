@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useEmailLogStore } from '@/store/emailLogStore';
 import { usePlanningStore } from '@/store/planningStore';
-import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen, Clock, CheckCircle2, XCircle, Trash2, Loader2 } from 'lucide-react';
+import { useExcludedUsersStore } from '@/store/excludedUsersStore';
+import { procoreService } from '@/services/procore.service';
+import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen, Clock, CheckCircle2, XCircle, Trash2, Loader2, UserCheck, UserX } from 'lucide-react';
 
 function formatDDMMYYYY(iso: string): string {
   try {
@@ -18,6 +20,22 @@ function formatDDMMYYYY(iso: string): string {
 export default function DashboardPage() {
   const logs = useEmailLogStore((s) => s.logs);
   const history = usePlanningStore((s) => s.history);
+  const excludedUserIds = useExcludedUsersStore((s) => s.excludedUserIds);
+
+  // Procore users directory
+  const [procoreUsers, setProcoreUsers] = useState<Array<{ id: number; name: string; email_address: string }>>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+
+  useEffect(() => {
+    if (procoreService.isAuthenticated()) {
+      procoreService.getCompanyUsers().then((users) => {
+        setProcoreUsers(users);
+        setLoadingUsers(false);
+      }).catch(() => setLoadingUsers(false));
+    } else {
+      setLoadingUsers(false);
+    }
+  }, []);
 
   // Pending Procore notes
   interface PendingNote {
@@ -93,6 +111,27 @@ export default function DashboardPage() {
     .filter((l) => l.status === 'sent')
     .reduce((sum, l) => sum + l.crewCount, 0);
 
+  // Tomorrow's email analytics
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowDateStr = tomorrow.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Find emails sent for tomorrow's date
+  const tomorrowEmails = logs.filter((l) => l.status === 'sent' && l.date.startsWith(tomorrowDateStr));
+  
+  // Get all user IDs who received tomorrow's emails
+  const recipientIdsForTomorrow = new Set<number>();
+  tomorrowEmails.forEach((email) => {
+    email.recipientUserIds?.forEach((id) => recipientIdsForTomorrow.add(id));
+  });
+
+  // Filter out excluded users from directory
+  const activeUsers = procoreUsers.filter((u) => !excludedUserIds.has(u.id));
+  
+  // Count users who received vs didn't receive emails for tomorrow
+  const usersWithEmail = activeUsers.filter((u) => recipientIdsForTomorrow.has(u.id)).length;
+  const usersWithoutEmail = activeUsers.length - usersWithEmail;
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
@@ -130,6 +169,45 @@ export default function DashboardPage() {
           colour="primary"
         />
       </div>
+
+      {/* Tomorrow's Email Analytics */}
+      {procoreService.isAuthenticated() && !loadingUsers && activeUsers.length > 0 && (
+        <div className="mb-8 section-card">
+          <div className="section-header">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Tomorrow's Planning Status ({tomorrowDateStr})
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 gap-4 p-4">
+            <div className="flex items-center gap-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
+              <div className="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
+                <UserCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{usersWithEmail}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Users notified</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20">
+              <div className="rounded-lg bg-orange-100 p-2 dark:bg-orange-900/30">
+                <UserX className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{usersWithoutEmail}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Not yet notified</p>
+              </div>
+            </div>
+          </div>
+          {usersWithoutEmail > 0 && (
+            <div className="border-t px-4 py-3 dark:border-gray-700">
+              <p className="text-xs text-gray-500">
+                {usersWithoutEmail} active user{usersWithoutEmail > 1 ? 's' : ''} in the directory {usersWithoutEmail > 1 ? 'have' : 'has'} not received planning emails for tomorrow yet.
+                {excludedUserIds.size > 0 && ` (${excludedUserIds.size} user${excludedUserIds.size > 1 ? 's' : ''} excluded from counts)`}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Scheduled Procore Updates */}
       <div className="mb-8 section-card">

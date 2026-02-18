@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useExcludedUsersStore } from '@/store/excludedUsersStore';
 import { procoreService } from '@/services/procore.service';
 import { authService, type AuthUser } from '@/services/auth.service';
-import { Plug, Unplug, LogIn, LogOut } from 'lucide-react';
+import { Plug, Unplug, LogIn, LogOut, Users, Loader2 } from 'lucide-react';
+import type { ProcoreUser } from '@/types/procore.types';
 
 export default function SettingsPage() {
   const {
@@ -11,15 +13,33 @@ export default function SettingsPage() {
     defaultCrewCount, setDefaultCrewCount,
   } = useSettingsStore();
 
+  const { excludedUserIds, excludeUser, includeUser } = useExcludedUsersStore();
+
   const procoreConfigured = procoreService.isConfigured();
   const [procoreConnected, setProcoreConnected] = useState(procoreService.isAuthenticated());
 
   const msalConfigured = authService.isConfigured();
   const [msalUser, setMsalUser] = useState<AuthUser | null>(null);
 
+  // Procore users for exclusion settings
+  const [procoreUsers, setProcoreUsers] = useState<ProcoreUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
   useEffect(() => {
     authService.getCurrentUser().then(setMsalUser);
   }, []);
+
+  useEffect(() => {
+    if (procoreConnected) {
+      setLoadingUsers(true);
+      procoreService.getCompanyUsers()
+        .then((users) => {
+          setProcoreUsers(users);
+          setLoadingUsers(false);
+        })
+        .catch(() => setLoadingUsers(false));
+    }
+  }, [procoreConnected]);
 
   const handleConnectProcore = () => {
     procoreService.startOAuthFlow();
@@ -160,6 +180,64 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
+
+        {/* Email Analytics Settings */}
+        {procoreConnected && (
+          <div className="section-card p-4">
+            <h2 className="section-header flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Email Analytics Settings
+            </h2>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              Exclude users from the "Tomorrow's Planning Status" analytics on the Dashboard. Excluded users won't be counted in the "Not yet notified" total.
+            </p>
+            <div className="mt-4">
+              {loadingUsers ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading users...
+                </div>
+              ) : procoreUsers.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">No users found.</p>
+              ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto rounded border border-gray-200 p-3 dark:border-gray-700">
+                  {procoreUsers.map((user) => (
+                    <label
+                      key={user.id}
+                      className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={excludedUserIds.has(user.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            excludeUser(user.id);
+                          } else {
+                            includeUser(user.id);
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-primary-600"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-gray-900 dark:text-white">
+                          {user.name}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {user.email_address}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {excludedUserIds.size > 0 && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {excludedUserIds.size} {excludedUserIds.size === 1 ? 'user' : 'users'} excluded from analytics
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );

@@ -98,6 +98,15 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
 
     setSending(true);
     setError('');
+    
+    // Map email addresses to Procore user IDs for analytics
+    const recipientUserIds = toList
+      .map((email) => {
+        const user = users.find((u) => u.email_address.toLowerCase() === email.toLowerCase());
+        return user?.id;
+      })
+      .filter((id): id is number => id !== undefined);
+    
     try {
       const html = buildEmailHtml(plan);
       const result = await graphService.sendPlanningEmail(subject, html, toList, ccList);
@@ -119,6 +128,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
         sentBy: userEmail,
         status: result.success ? 'sent' : 'failed',
         error: result.error,
+        recipientUserIds: recipientUserIds.length > 0 ? recipientUserIds : undefined,
       };
       addLog(logEntry);
 
@@ -149,6 +159,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
         sentBy: userEmail,
         status: 'failed',
         error: err instanceof Error ? err.message : 'Unknown error',
+        recipientUserIds: recipientUserIds.length > 0 ? recipientUserIds : undefined,
       });
       setError(err instanceof Error ? err.message : 'Unexpected error sending email.');
     } finally {

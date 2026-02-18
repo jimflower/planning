@@ -8,6 +8,7 @@ export interface EmailLogEntry {
   subject: string;
   toRecipients: string[];
   ccRecipients: string[];
+  recipientUserIds?: number[]; // Procore user IDs of recipients (for analytics)
   projectNumber: string;
   subjobCode: string;
   client: string;
