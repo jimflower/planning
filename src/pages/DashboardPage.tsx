@@ -121,6 +121,19 @@ export default function DashboardPage() {
     .filter((l) => l.status === 'sent')
     .reduce((sum, l) => sum + l.crewCount, 0);
 
+  // Today's email analytics
+  const today = new Date();
+  const todayDateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Find emails sent for today's date
+  const todayEmails = logs.filter((l) => l.status === 'sent' && l.date.startsWith(todayDateStr));
+  
+  // Get all user IDs who received today's emails
+  const recipientIdsForToday = new Set<number>();
+  todayEmails.forEach((email) => {
+    email.recipientUserIds?.forEach((id) => recipientIdsForToday.add(id));
+  });
+
   // Tomorrow's email analytics
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -138,9 +151,13 @@ export default function DashboardPage() {
   // Filter out excluded users from directory
   const activeUsers = procoreUsers.filter((u) => !excludedUserIds.has(u.id));
   
+  // Count users who received vs didn't receive emails for today
+  const todayUsersWithEmail = activeUsers.filter((u) => recipientIdsForToday.has(u.id)).length;
+  const todayUsersWithoutEmail = activeUsers.length - todayUsersWithEmail;
+
   // Count users who received vs didn't receive emails for tomorrow
-  const usersWithEmail = activeUsers.filter((u) => recipientIdsForTomorrow.has(u.id)).length;
-  const usersWithoutEmail = activeUsers.length - usersWithEmail;
+  const tomorrowUsersWithEmail = activeUsers.filter((u) => recipientIdsForTomorrow.has(u.id)).length;
+  const tomorrowUsersWithoutEmail = activeUsers.length - tomorrowUsersWithEmail;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
@@ -180,6 +197,45 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* Today's Email Analytics */}
+      {procoreService.isAuthenticated() && !loadingUsers && activeUsers.length > 0 && (
+        <div className="mb-8 section-card">
+          <div className="section-header">
+            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Today's Planning Status ({todayDateStr})
+            </h2>
+          </div>
+          <div className="grid grid-cols-2 gap-4 p-4">
+            <div className="flex items-center gap-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
+              <div className="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
+                <UserCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{todayUsersWithEmail}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Users notified</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 rounded-lg bg-orange-50 p-4 dark:bg-orange-900/20">
+              <div className="rounded-lg bg-orange-100 p-2 dark:bg-orange-900/30">
+                <UserX className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{todayUsersWithoutEmail}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">Not yet notified</p>
+              </div>
+            </div>
+          </div>
+          {todayUsersWithoutEmail > 0 && (
+            <div className="border-t px-4 py-3 dark:border-gray-700">
+              <p className="text-xs text-gray-500">
+                {todayUsersWithoutEmail} active user{todayUsersWithoutEmail > 1 ? 's' : ''} in the directory {todayUsersWithoutEmail > 1 ? 'have' : 'has'} not received planning emails for today yet.
+                {excludedUserIds.size > 0 && ` (${excludedUserIds.size} user${excludedUserIds.size > 1 ? 's' : ''} excluded from counts)`}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tomorrow's Email Analytics */}
       {procoreService.isAuthenticated() && !loadingUsers && activeUsers.length > 0 && (
         <div className="mb-8 section-card">
@@ -194,7 +250,7 @@ export default function DashboardPage() {
                 <UserCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{usersWithEmail}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{tomorrowUsersWithEmail}</p>
                 <p className="text-xs text-gray-600 dark:text-gray-400">Users notified</p>
               </div>
             </div>
@@ -203,15 +259,15 @@ export default function DashboardPage() {
                 <UserX className="h-5 w-5 text-orange-600 dark:text-orange-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{usersWithoutEmail}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{tomorrowUsersWithoutEmail}</p>
                 <p className="text-xs text-gray-600 dark:text-gray-400">Not yet notified</p>
               </div>
             </div>
           </div>
-          {usersWithoutEmail > 0 && (
+          {tomorrowUsersWithoutEmail > 0 && (
             <div className="border-t px-4 py-3 dark:border-gray-700">
               <p className="text-xs text-gray-500">
-                {usersWithoutEmail} active user{usersWithoutEmail > 1 ? 's' : ''} in the directory {usersWithoutEmail > 1 ? 'have' : 'has'} not received planning emails for tomorrow yet.
+                {tomorrowUsersWithoutEmail} active user{tomorrowUsersWithoutEmail > 1 ? 's' : ''} in the directory {tomorrowUsersWithoutEmail > 1 ? 'have' : 'has'} not received planning emails for tomorrow yet.
                 {excludedUserIds.size > 0 && ` (${excludedUserIds.size} user${excludedUserIds.size > 1 ? 's' : ''} excluded from counts)`}
               </p>
             </div>
