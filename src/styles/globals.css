@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-white text-gray-800 antialiased dark:bg-gray-900 dark:text-gray-100;
+    font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded bg-primary-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 active:scale-95 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 active:scale-95 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center rounded bg-danger-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-danger-600 focus:outline-none focus:ring-2 focus:ring-danger-500 focus:ring-offset-2 active:scale-95 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .input-field {
+    @apply block w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm transition-colors placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:bg-gray-100 disabled:text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500;
+  }
+  .section-card {
+    @apply rounded-lg border border-gray-200 bg-white shadow-card dark:border-gray-700 dark:bg-gray-800;
+  }
+  .section-header {
+    @apply flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700;
+  }
+  .section-header-green {
+    @apply flex items-center justify-center bg-green-500 px-4 py-2 text-center font-semibold text-white;
+  }
+}

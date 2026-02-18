@@ -1,0 +1,315 @@
+import React, { useState, useEffect } from 'react';
+import { X, Send, LogIn, Loader2 } from 'lucide-react';
+import { authService, type AuthUser } from '@/services/auth.service';
+import { graphService } from '@/services/graph.service';
+import { buildEmailSubject, buildEmailHtml } from '@/services/emailTemplate';
+import { usePlanningStore } from '@/store/planningStore';
+import { useEmailLogStore } from '@/store/emailLogStore';
+import { useProcoreData } from '@/hooks/useProcoreData';
+import { procoreService } from '@/services/procore.service';
+import { uuid } from '@/lib/utils/dateHelpers';
+import type { PlanningEmail } from '@/types/planning.types';
+import type { EmailLogEntry } from '@/types/email.types';
+
+const ALWAYS_CC = 'planning@gnbenergy.com.au';
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  onSent: () => void;
+}
+
+export function SendEmailDialog({ open, onClose, onSent }: Props) {
+  const plan = usePlanningStore((s) => s.currentPlan) as PlanningEmail;
+  const { users, projects } = useProcoreData();
+  const addLog = useEmailLogStore((s) => s.addLog);
+
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [toField, setToField] = useState('');
+  const [ccField, setCcField] = useState(ALWAYS_CC);
+  const [subject, setSubject] = useState('');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
+
+  const configured = authService.isConfigured();
+
+  // On open: set subject, resolve crew emails, check auth
+  useEffect(() => {
+    if (!open) return;
+    setError('');
+    setSubject(buildEmailSubject(plan));
+    authService.getCurrentUser().then(setUser);
+
+    // Ensure CC always includes planning@gnbenergy.com.au
+    setCcField((prev) => {
+      const existing = prev
+        .split(/[,;]/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      if (!existing.includes(ALWAYS_CC.toLowerCase())) {
+        return prev ? `${prev}; ${ALWAYS_CC}` : ALWAYS_CC;
+      }
+      return prev;
+    });
+
+    // Auto-populate To with crew member emails from Procore
+    if (users.length > 0 && plan.crewAssignments.length > 0) {
+      const crewNames = plan.crewAssignments
+        .map((c) => c.name?.trim())
+        .filter(Boolean);
+
+      const emails = crewNames
+        .map((name) => {
+          const match = users.find(
+            (u) => u.name.toLowerCase() === name.toLowerCase(),
+          );
+          return match?.email_address;
+        })
+        .filter((e): e is string => Boolean(e));
+
+      // Deduplicate
+      const unique = [...new Set(emails.map((e) => e.toLowerCase()))];
+      if (unique.length > 0) {
+        setToField(unique.join('; '));
+      }
+    }
+  }, [open, plan, users]);
+
+  const handleSignIn = async () => {
+    setSigningIn(true);
+    setError('');
+    try {
+      const u = await authService.signIn();
+      setUser(u);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign-in failed');
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  const handleSend = async () => {
+    const toList = toField
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (toList.length === 0) {
+      setError('Enter at least one recipient email address.');
+      return;
+    }
+    const ccList = ccField
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // Ensure planning@gnbenergy.com.au is always CC'd
+    if (!ccList.some((e) => e.toLowerCase() === ALWAYS_CC.toLowerCase())) {
+      ccList.push(ALWAYS_CC);
+    }
+
+    setSending(true);
+    setError('');
+    try {
+      const html = buildEmailHtml(plan);
+      const result = await graphService.sendPlanningEmail(subject, html, toList, ccList);
+
+      // Log the attempt
+      const logEntry: EmailLogEntry = {
+        id: uuid(),
+        planId: plan.id,
+        date: plan.date,
+        sentAt: new Date().toISOString(),
+        subject,
+        toRecipients: toList,
+        ccRecipients: ccList,
+        projectNumber: plan.projectNumber,
+        subjobCode: plan.subjobCode,
+        client: plan.client,
+        location: plan.location,
+        crewCount: plan.crewAssignments.filter((c) => c.name).length,
+        sentBy: user?.email ?? '',
+        status: result.success ? 'sent' : 'failed',
+        error: result.error,
+      };
+      addLog(logEntry);
+
+      if (result.success) {
+        // Post to Procore daily log in background
+        postToProcoreDailyLog(plan, subject).catch((err) =>
+          console.warn('[Procore] Daily log note failed:', err),
+        );
+        onSent();
+        onClose();
+      } else {
+        setError(result.error ?? 'Failed to send email.');
+      }
+    } catch (err: unknown) {
+      // Log failures too
+      addLog({
+        id: uuid(),
+        planId: plan.id,
+        date: plan.date,
+        sentAt: new Date().toISOString(),
+        subject,
+        toRecipients: toList,
+        ccRecipients: ccList,
+        projectNumber: plan.projectNumber,
+        subjobCode: plan.subjobCode,
+        client: plan.client,
+        location: plan.location,
+        crewCount: plan.crewAssignments.filter((c) => c.name).length,
+        sentBy: user?.email ?? '',
+        status: 'failed',
+        error: err instanceof Error ? err.message : 'Unknown error',
+      });
+      setError(err instanceof Error ? err.message : 'Unexpected error sending email.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  /** Post a daily log note to Procore for the selected project */
+  const postToProcoreDailyLog = async (p: PlanningEmail, subj: string) => {
+    if (!procoreService.isAuthenticated()) return;
+    const project = projects.find(
+      (pr) => pr.project_number === p.projectNumber || pr.name === p.projectNumber,
+    );
+    if (!project) return;
+    try {
+      await procoreService.createDailyLogNote(project.id, p.date, subj, p);
+      console.log('[Procore] Daily log note created for project', project.id);
+    } catch (err) {
+      console.warn('[Procore] Failed to create daily log note:', err);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl dark:bg-gray-800">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b px-5 py-4 dark:border-gray-700">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Send Daily Plan
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          {/* Not configured warning */}
+          {!configured && (
+            <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+              <strong>Azure AD not configured.</strong> Add{' '}
+              <code className="text-xs">VITE_AZURE_CLIENT_ID</code> and{' '}
+              <code className="text-xs">VITE_AZURE_TENANT_ID</code> to your{' '}
+              <code className="text-xs">.env</code> file, then reload.
+            </div>
+          )}
+
+          {/* Auth section */}
+          {configured && !user && (
+            <div className="flex flex-col items-center gap-3 rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
+              <p className="text-sm text-blue-800 dark:text-blue-300">
+                Sign in with your Microsoft 365 account to send emails.
+              </p>
+              <button
+                onClick={handleSignIn}
+                disabled={signingIn}
+                className="btn-primary flex items-center gap-2"
+              >
+                {signingIn ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogIn className="h-4 w-4" />
+                )}
+                {signingIn ? 'Signing in…' : 'Sign in with Microsoft'}
+              </button>
+            </div>
+          )}
+
+          {/* Signed-in indicator */}
+          {user && (
+            <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-300">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              Signed in as <strong>{user.email}</strong>
+            </div>
+          )}
+
+          {/* Subject */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Subject
+            </label>
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="form-input w-full rounded-lg border-gray-300 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+
+          {/* To */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              To <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="email@example.com; email2@example.com"
+              value={toField}
+              onChange={(e) => setToField(e.target.value)}
+              className="form-input w-full rounded-lg border-gray-300 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            />
+            <p className="mt-1 text-xs text-gray-500">Separate multiple with commas or semicolons</p>
+          </div>
+
+          {/* CC */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              CC
+            </label>
+            <input
+              type="text"
+              placeholder="Optional"
+              value={ccField}
+              onChange={(e) => setCcField(e.target.value)}
+              className="form-input w-full rounded-lg border-gray-300 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+            />
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 border-t px-5 py-4 dark:border-gray-700">
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={handleSend}
+            disabled={!user || sending || !configured}
+            className="btn-primary flex items-center gap-2 disabled:opacity-50"
+          >
+            {sending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {sending ? 'Sending…' : 'Send Email'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

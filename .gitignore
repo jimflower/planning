@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+vite.config.js
+vite.config.d.ts
+vite.config.d.ts.map
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor
+.vscode/*
+!.vscode/tasks.json
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+
+# database
+*.db
+*.db-wal
+*.db-shm
