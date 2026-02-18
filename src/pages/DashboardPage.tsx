@@ -20,13 +20,16 @@ function formatDDMMYYYY(iso: string): string {
 export default function DashboardPage() {
   const logs = useEmailLogStore((s) => s.logs);
   const history = usePlanningStore((s) => s.history);
-  const excludedUserIds = useExcludedUsersStore((s) => s.excludedUserIds);
+  const { excludedUserIds, loadFromServer } = useExcludedUsersStore();
 
   // Procore users directory
   const [procoreUsers, setProcoreUsers] = useState<Array<{ id: number; name: string; email_address: string }>>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
   useEffect(() => {
+    // Load excluded users from server
+    loadFromServer();
+    
     if (procoreService.isAuthenticated()) {
       procoreService.getCompanyUsers().then((all) => {
         // Filter to only GNB Energy employees (same filter as crew dropdowns)
@@ -40,7 +43,7 @@ export default function DashboardPage() {
     } else {
       setLoadingUsers(false);
     }
-  }, []);
+  }, [loadFromServer]);
 
   // Pending Procore notes
   interface PendingNote {

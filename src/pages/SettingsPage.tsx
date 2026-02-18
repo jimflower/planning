@@ -13,7 +13,7 @@ export default function SettingsPage() {
     defaultCrewCount, setDefaultCrewCount,
   } = useSettingsStore();
 
-  const { excludedUserIds, excludeUser, includeUser } = useExcludedUsersStore();
+  const { excludedUserIds, excludeUser, includeUser, loadFromServer } = useExcludedUsersStore();
 
   const procoreConfigured = procoreService.isConfigured();
   const [procoreConnected, setProcoreConnected] = useState(procoreService.isAuthenticated());
@@ -24,10 +24,13 @@ export default function SettingsPage() {
   // Procore users for exclusion settings
   const [procoreUsers, setProcoreUsers] = useState<ProcoreUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [savingExclusion, setSavingExclusion] = useState(false);
 
   useEffect(() => {
     authService.getCurrentUser().then(setMsalUser);
-  }, []);
+    // Load excluded users from server
+    loadFromServer();
+  }, [loadFromServer]);
 
   useEffect(() => {
     if (procoreConnected) {
@@ -74,6 +77,26 @@ export default function SettingsPage() {
   return (
     <main className="mx-auto max-w-2xl px-4 py-6">
       <h1 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+
+      {/* User Info Banner */}
+      {msalUser && (
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/30">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                Signed in as: {msalUser.displayName}
+              </p>
+              <p className="text-xs text-blue-700 dark:text-blue-300">{msalUser.email}</p>
+            </div>
+            <div className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800 dark:bg-blue-800 dark:text-blue-200">
+              User Role: <span className="capitalize">user</span>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
+            💡 Global settings like excluded users are shared across all users. Contact an admin to change your role.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-6">
         {/* General */}
@@ -214,11 +237,20 @@ export default function SettingsPage() {
                       <input
                         type="checkbox"
                         checked={excludedUserIds.has(user.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            excludeUser(user.id);
-                          } else {
-                            includeUser(user.id);
+                        disabled={savingExclusion}
+                        onChange={async (e) => {
+                          if (!msalUser?.email) return;
+                          setSavingExclusion(true);
+                          try {
+                            if (e.target.checked) {
+                              await excludeUser(user.id, msalUser.email);
+                            } else {
+                              await includeUser(user.id, msalUser.email);
+                            }
+                          } catch (err) {
+                            alert('Failed to update user exclusion. You may not have permission.');
+                          } finally {
+                            setSavingExclusion(false);
                           }
                         }}
                         className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-primary-600"

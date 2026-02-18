@@ -22,8 +22,10 @@ import {
   insertPendingNote, getAllPendingNotes, getPendingNotesByDate,
   markNotePosted, markNoteFailed, updateNoteTokens, deletePendingNote,
   upsertProcoreCredentials, getLatestProcoreCredentials, getAllProcoreCredentials,
+  getSetting, getAllSettings, upsertSetting, deleteSetting,
+  getUserRole, getAllUserRoles, upsertUserRole, deleteUserRole,
 } from './db.js';
-import type { PlanRow, PendingNoteRow, ProcoreCredentialRow } from './db.js';
+import type { PlanRow, PendingNoteRow, ProcoreCredentialRow, SettingRow, UserRoleRow } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -374,6 +376,136 @@ app.get('/api/procore-credentials', (_req, res) => {
   } catch (err) {
     console.error('[API] GET /api/procore-credentials error:', err);
     res.status(500).json({ error: 'Failed to retrieve credentials' });
+  }
+});
+
+/* ── Global Settings ───────────────────────────────── */
+
+// Get all settings
+app.get('/api/settings', (_req, res) => {
+  try {
+    const settings = getAllSettings();
+    const settingsObj: Record<string, string> = {};
+    settings.forEach((s) => {
+      settingsObj[s.key] = s.value;
+    });
+    res.json(settingsObj);
+  } catch (err) {
+    console.error('[API] GET /api/settings error:', err);
+    res.status(500).json({ error: 'Failed to retrieve settings' });
+  }
+});
+
+// Get a single setting
+app.get('/api/settings/:key', (req, res) => {
+  try {
+    const setting = getSetting(req.params.key);
+    if (!setting) return res.status(404).json({ error: 'Setting not found' });
+    res.json({ key: setting.key, value: setting.value });
+  } catch (err) {
+    console.error('[API] GET /api/settings/:key error:', err);
+    res.status(500).json({ error: 'Failed to retrieve setting' });
+  }
+});
+
+// Update or create a setting
+app.post('/api/settings', (req, res) => {
+  try {
+    const { key, value, userEmail } = req.body;
+    if (!key || !value) {
+      return res.status(400).json({ error: 'key and value are required' });
+    }
+    
+    // Check user role — only admins and managers can update global settings
+    const userRole = getUserRole(userEmail ?? '');
+    if (userRole && !['admin', 'manager'].includes(userRole.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    
+    upsertSetting(key, value, userEmail ?? 'system');
+    console.log(`[API] Updated setting ${key} by ${userEmail ?? 'system'}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] POST /api/settings error:', err);
+    res.status(500).json({ error: 'Failed to update setting' });
+  }
+});
+
+// Delete a setting
+app.delete('/api/settings/:key', (req, res) => {
+  try {
+    const { userEmail } = req.body;
+    
+    // Check user role — only admins can delete settings
+    const userRole = getUserRole(userEmail ?? '');
+    if (!userRole || userRole.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin role required' });
+    }
+    
+    const deleted = deleteSetting(req.params.key);
+    if (!deleted) return res.status(404).json({ error: 'Setting not found' });
+    console.log(`[API] Deleted setting ${req.params.key}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/settings/:key error:', err);
+    res.status(500).json({ error: 'Failed to delete setting' });
+  }
+});
+
+/* ── User Roles ────────────────────────────────────── */
+
+// Get current user's role
+app.get('/api/user-role/:email', (req, res) => {
+  try {
+    const role = getUserRole(req.params.email);
+    // Default to 'user' if no role set
+    res.json({ email: req.params.email, role: role?.role ?? 'user' });
+  } catch (err) {
+    console.error('[API] GET /api/user-role/:email error:', err);
+    res.status(500).json({ error: 'Failed to retrieve user role' });
+  }
+});
+
+// Get all user roles (admin only)
+app.get('/api/user-roles', (req, res) => {
+  try {
+    const { userEmail } = req.query;
+    
+    // Check if requesting user is admin
+    const requestingUser = getUserRole(userEmail as string ?? '');
+    if (!requestingUser || requestingUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin role required' });
+    }
+    
+    const roles = getAllUserRoles();
+    res.json(roles);
+  } catch (err) {
+    console.error('[API] GET /api/user-roles error:', err);
+    res.status(500).json({ error: 'Failed to retrieve user roles' });
+  }
+});
+
+// Update user role (admin only)
+app.post('/api/user-role', (req, res) => {
+  try {
+    const { email, role, userEmail } = req.body;
+    
+    // Check if requesting user is admin
+    const requestingUser = getUserRole(userEmail ?? '');
+    if (!requestingUser || requestingUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin role required' });
+    }
+    
+    if (!email || !role || !['admin', 'manager', 'user'].includes(role)) {
+      return res.status(400).json({ error: 'Valid email and role (admin|manager|user) required' });
+    }
+    
+    upsertUserRole(email, role);
+    console.log(`[API] Set role for ${email} to ${role} by ${userEmail}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] POST /api/user-role error:', err);
+    res.status(500).json({ error: 'Failed to update user role' });
   }
 });
 

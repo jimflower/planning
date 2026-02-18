@@ -75,6 +75,22 @@ db.exec(`
     company_id       TEXT NOT NULL DEFAULT '',
     updated_at       TEXT NOT NULL
   );
+
+  -- Global settings (shared across all users)
+  CREATE TABLE IF NOT EXISTS settings (
+    key              TEXT PRIMARY KEY,
+    value            TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    updated_by       TEXT NOT NULL DEFAULT ''
+  );
+
+  -- User roles for permission management
+  CREATE TABLE IF NOT EXISTS user_roles (
+    email            TEXT PRIMARY KEY,
+    role             TEXT NOT NULL DEFAULT 'user',  -- admin | manager | user
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+  );
 `);
 
 /* ── Types matching the frontend PlanningEmail ─────── */
@@ -303,6 +319,101 @@ export function getLatestProcoreCredentials(): ProcoreCredentialRow | undefined 
 
 export function getAllProcoreCredentials(): ProcoreCredentialRow[] {
   return credStmts.getAll.all() as ProcoreCredentialRow[];
+}
+
+/* ── Global Settings (shared across all users) ──────── */
+export interface SettingRow {
+  key: string;
+  value: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+const settingStmts = {
+  upsert: db.prepare(`
+    INSERT INTO settings (key, value, updated_at, updated_by)
+    VALUES (@key, @value, @updated_at, @updated_by)
+    ON CONFLICT(key) DO UPDATE SET
+      value      = @value,
+      updated_at = @updated_at,
+      updated_by = @updated_by
+  `),
+
+  get: db.prepare(`SELECT * FROM settings WHERE key = ?`),
+  
+  getAll: db.prepare(`SELECT * FROM settings`),
+  
+  delete: db.prepare(`DELETE FROM settings WHERE key = ?`),
+};
+
+export function getSetting(key: string): SettingRow | undefined {
+  return settingStmts.get.get(key) as SettingRow | undefined;
+}
+
+export function getAllSettings(): SettingRow[] {
+  return settingStmts.getAll.all() as SettingRow[];
+}
+
+export function upsertSetting(key: string, value: string, updatedBy: string): void {
+  settingStmts.upsert.run({
+    key,
+    value,
+    updated_at: new Date().toISOString(),
+    updated_by: updatedBy,
+  });
+}
+
+export function deleteSetting(key: string): boolean {
+  const result = settingStmts.delete.run(key);
+  return result.changes > 0;
+}
+
+/* ── User Roles (for permission management) ──────────── */
+export interface UserRoleRow {
+  email: string;
+  role: 'admin' | 'manager' | 'user';
+  created_at: string;
+  updated_at: string;
+}
+
+const roleStmts = {
+  upsert: db.prepare(`
+    INSERT INTO user_roles (email, role, created_at, updated_at)
+    VALUES (@email, @role, @created_at, @updated_at)
+    ON CONFLICT(email) DO UPDATE SET
+      role       = @role,
+      updated_at = @updated_at
+  `),
+
+  get: db.prepare(`SELECT * FROM user_roles WHERE email = ?`),
+  
+  getAll: db.prepare(`SELECT * FROM user_roles ORDER BY email`),
+  
+  delete: db.prepare(`DELETE FROM user_roles WHERE email = ?`),
+};
+
+export function getUserRole(email: string): UserRoleRow | undefined {
+  return roleStmts.get.get(email) as UserRoleRow | undefined;
+}
+
+export function getAllUserRoles(): UserRoleRow[] {
+  return roleStmts.getAll.all() as UserRoleRow[];
+}
+
+export function upsertUserRole(email: string, role: 'admin' | 'manager' | 'user'): void {
+  const existing = getUserRole(email);
+  const now = new Date().toISOString();
+  roleStmts.upsert.run({
+    email,
+    role,
+    created_at: existing?.created_at ?? now,
+    updated_at: now,
+  });
+}
+
+export function deleteUserRole(email: string): boolean {
+  const result = roleStmts.delete.run(email);
+  return result.changes > 0;
 }
 
 export default db;
