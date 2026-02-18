@@ -53,7 +53,7 @@ export function Header() {
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         {/* Logo / title */}
         <Link to="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <img src="/gnb-energy-logo.jpg" alt="GNB Energy" className="h-9 w-auto" />
+          <ClipboardList className="h-6 w-6" />
           <span className="hidden sm:inline">Daily Planning Hub</span>
         </Link>
 
