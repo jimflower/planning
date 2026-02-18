@@ -24,8 +24,9 @@ import {
   upsertProcoreCredentials, getLatestProcoreCredentials, getAllProcoreCredentials,
   getSetting, getAllSettings, upsertSetting, deleteSetting,
   getUserRole, getAllUserRoles, upsertUserRole, deleteUserRole,
+  insertEmailLog, getAllEmailLogs, getEmailLogById, getEmailLogsByDateRange, deleteEmailLog,
 } from './db.js';
-import type { PlanRow, PendingNoteRow, ProcoreCredentialRow, SettingRow, UserRoleRow } from './db.js';
+import type { PlanRow, PendingNoteRow, ProcoreCredentialRow, SettingRow, UserRoleRow, EmailLogRow } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -506,6 +507,72 @@ app.post('/api/user-role', (req, res) => {
   } catch (err) {
     console.error('[API] POST /api/user-role error:', err);
     res.status(500).json({ error: 'Failed to update user role' });
+  }
+});
+
+/* ── Email Logs ────────────────────────────────────── */
+
+// Get all email logs
+app.get('/api/email-logs', (_req, res) => {
+  try {
+    const logs = getAllEmailLogs();
+    res.json(logs);
+  } catch (err) {
+    console.error('[API] GET /api/email-logs error:', err);
+    res.status(500).json({ error: 'Failed to retrieve email logs' });
+  }
+});
+
+// Get email logs by date range
+app.get('/api/email-logs/range', (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'startDate and endDate are required' });
+    }
+    const logs = getEmailLogsByDateRange(startDate as string, endDate as string);
+    res.json(logs);
+  } catch (err) {
+    console.error('[API] GET /api/email-logs/range error:', err);
+    res.status(500).json({ error: 'Failed to retrieve email logs' });
+  }
+});
+
+// Create email log
+app.post('/api/email-logs', (req, res) => {
+  try {
+    const log = req.body as EmailLogRow;
+    if (!log.id || !log.plan_id || !log.date || !log.sent_at) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Ensure JSON fields are stringified
+    const logRow: EmailLogRow = {
+      ...log,
+      to_recipients: typeof log.to_recipients === 'string' ? log.to_recipients : JSON.stringify(log.to_recipients),
+      cc_recipients: typeof log.cc_recipients === 'string' ? log.cc_recipients : JSON.stringify(log.cc_recipients),
+      recipient_user_ids: typeof log.recipient_user_ids === 'string' ? log.recipient_user_ids : JSON.stringify(log.recipient_user_ids || []),
+    };
+
+    insertEmailLog(logRow);
+    console.log(`[API] Logged email ${log.id} for plan ${log.plan_id} by ${log.sent_by}`);
+    res.json({ success: true, id: log.id });
+  } catch (err) {
+    console.error('[API] POST /api/email-logs error:', err);
+    res.status(500).json({ error: 'Failed to save email log' });
+  }
+});
+
+// Delete email log
+app.delete('/api/email-logs/:id', (req, res) => {
+  try {
+    const deleted = deleteEmailLog(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Email log not found' });
+    console.log(`[API] Deleted email log ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/email-logs/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete email log' });
   }
 });
 

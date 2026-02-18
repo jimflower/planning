@@ -24,7 +24,12 @@ function formatDateTime(iso: string): string {
 }
 
 export default function EmailHistoryPage() {
-  const { logs, clearLogs } = useEmailLogStore();
+  const { logs, clearLogs, loadFromServer } = useEmailLogStore();
+
+  // Load email logs from server on mount
+  React.useEffect(() => {
+    loadFromServer();
+  }, [loadFromServer]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6">

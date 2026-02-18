@@ -18,9 +18,9 @@ function formatDDMMYYYY(iso: string): string {
 }
 
 export default function DashboardPage() {
-  const logs = useEmailLogStore((s) => s.logs);
+  const { logs, loadFromServer } = useEmailLogStore();
   const history = usePlanningStore((s) => s.history);
-  const { excludedUserIds, loadFromServer } = useExcludedUsersStore();
+  const { excludedUserIds, loadFromServer: loadExcludedUsers } = useExcludedUsersStore();
 
   // Procore users directory
   const [procoreUsers, setProcoreUsers] = useState<Array<{ id: number; name: string; email_address: string }>>([]);
@@ -28,6 +28,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     // Load excluded users from server
+    loadExcludedUsers();
+    // Load email logs from server
     loadFromServer();
     
     if (procoreService.isAuthenticated()) {
@@ -43,7 +45,7 @@ export default function DashboardPage() {
     } else {
       setLoadingUsers(false);
     }
-  }, [loadFromServer]);
+  }, [loadFromServer, loadExcludedUsers]);
 
   // Pending Procore notes
   interface PendingNote {

@@ -91,6 +91,30 @@ db.exec(`
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
   );
+
+  -- Email logs (global, shared across all users)
+  CREATE TABLE IF NOT EXISTS email_logs (
+    id               TEXT PRIMARY KEY,
+    plan_id          TEXT NOT NULL,
+    date             TEXT NOT NULL,
+    sent_at          TEXT NOT NULL,
+    subject          TEXT NOT NULL DEFAULT '',
+    to_recipients    TEXT NOT NULL DEFAULT '[]',    -- JSON array
+    cc_recipients    TEXT NOT NULL DEFAULT '[]',    -- JSON array
+    project_number   TEXT NOT NULL DEFAULT '',
+    subjob_code      TEXT NOT NULL DEFAULT '',
+    client           TEXT NOT NULL DEFAULT '',
+    location         TEXT NOT NULL DEFAULT '',
+    crew_count       INTEGER NOT NULL DEFAULT 0,
+    sent_by          TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'sent',  -- sent | failed
+    error            TEXT,
+    recipient_user_ids TEXT DEFAULT '[]'            -- JSON array of Procore user IDs
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_email_logs_date ON email_logs(date);
+  CREATE INDEX IF NOT EXISTS idx_email_logs_sent_at ON email_logs(sent_at);
+  CREATE INDEX IF NOT EXISTS idx_email_logs_status ON email_logs(status);
 `);
 
 /* ── Types matching the frontend PlanningEmail ─────── */
@@ -413,6 +437,73 @@ export function upsertUserRole(email: string, role: 'admin' | 'manager' | 'user'
 
 export function deleteUserRole(email: string): boolean {
   const result = roleStmts.delete.run(email);
+  return result.changes > 0;
+}
+
+/* ── Email Logs (global, shared across all users) ──── */
+export interface EmailLogRow {
+  id: string;
+  plan_id: string;
+  date: string;
+  sent_at: string;
+  subject: string;
+  to_recipients: string;  // JSON
+  cc_recipients: string;  // JSON
+  project_number: string;
+  subjob_code: string;
+  client: string;
+  location: string;
+  crew_count: number;
+  sent_by: string;
+  status: 'sent' | 'failed';
+  error: string | null;
+  recipient_user_ids: string;  // JSON
+}
+
+const emailLogStmts = {
+  insert: db.prepare(`
+    INSERT INTO email_logs (
+      id, plan_id, date, sent_at, subject, to_recipients, cc_recipients,
+      project_number, subjob_code, client, location, crew_count, sent_by,
+      status, error, recipient_user_ids
+    ) VALUES (
+      @id, @plan_id, @date, @sent_at, @subject, @to_recipients, @cc_recipients,
+      @project_number, @subjob_code, @client, @location, @crew_count, @sent_by,
+      @status, @error, @recipient_user_ids
+    )
+  `),
+
+  getAll: db.prepare(`SELECT * FROM email_logs ORDER BY sent_at DESC`),
+  
+  getById: db.prepare(`SELECT * FROM email_logs WHERE id = ?`),
+  
+  getByDateRange: db.prepare(`
+    SELECT * FROM email_logs 
+    WHERE date >= ? AND date <= ? 
+    ORDER BY sent_at DESC
+  `),
+  
+  deleteById: db.prepare(`DELETE FROM email_logs WHERE id = ?`),
+};
+
+export function insertEmailLog(log: EmailLogRow): void {
+  emailLogStmts.insert.run(log);
+}
+
+export function getAllEmailLogs(): EmailLogRow[] {
+  return emailLogStmts.getAll.all() as EmailLogRow[];
+}
+
+export function getEmailLogById(id: string): EmailLogRow | undefined {
+  return emailLogStmts.getById.get(id) as EmailLogRow | undefined;
+}
+
+export function getEmailLogsByDateRange(startDate: string, endDate: string): EmailLogRow[] {
+  return emailLogStmts.getByDateRange.all(startDate, endDate) as EmailLogRow[];
+}
+
+export function deleteEmailLog(id: string): boolean {
+  const result = emailLogStmts.deleteById.run(id);
   return result.changes > 0;
 }
 
