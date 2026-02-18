@@ -43,6 +43,28 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_plans_date ON plans(date);
   CREATE INDEX IF NOT EXISTS idx_plans_project ON plans(project_number);
+
+  -- Pending Procore notes: queued for future-date posting via cron
+  CREATE TABLE IF NOT EXISTS pending_procore_notes (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id            TEXT NOT NULL,
+    project_id         INTEGER NOT NULL,
+    scheduled_date     TEXT NOT NULL,          -- YYYY-MM-DD target date
+    subject            TEXT NOT NULL DEFAULT '',
+    comment_body       TEXT NOT NULL DEFAULT '',
+    access_token       TEXT NOT NULL,
+    refresh_token      TEXT NOT NULL,
+    token_expires_at   INTEGER NOT NULL,       -- epoch ms
+    company_id         TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'pending',  -- pending | posted | failed
+    created_at         TEXT NOT NULL,
+    posted_at          TEXT,
+    error              TEXT,
+    UNIQUE(plan_id, scheduled_date)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_pending_notes_date   ON pending_procore_notes(scheduled_date);
+  CREATE INDEX IF NOT EXISTS idx_pending_notes_status ON pending_procore_notes(status);
 `);
 
 /* ── Types matching the frontend PlanningEmail ─────── */
@@ -65,6 +87,23 @@ export interface PlanRow {
   procore_diary_id: string | null;
   crew_assignments: string; // JSON
   qa_requirements: string;  // JSON
+}
+
+export interface PendingNoteRow {
+  id: number;
+  plan_id: string;
+  project_id: number;
+  scheduled_date: string;
+  subject: string;
+  comment_body: string;
+  access_token: string;
+  refresh_token: string;
+  token_expires_at: number;
+  company_id: string;
+  status: 'pending' | 'posted' | 'failed';
+  created_at: string;
+  posted_at: string | null;
+  error: string | null;
 }
 
 /* ── Prepared statements ───────────────────────────── */
@@ -130,6 +169,85 @@ export function bulkUpsert(plans: PlanRow[]): number {
     return items.length;
   });
   return tx(plans);
+}
+
+/* ── Pending Procore Notes ─────────────────────────── */
+const pendingStmts = {
+  insert: db.prepare(`
+    INSERT INTO pending_procore_notes (
+      plan_id, project_id, scheduled_date, subject, comment_body,
+      access_token, refresh_token, token_expires_at, company_id,
+      status, created_at
+    ) VALUES (
+      @plan_id, @project_id, @scheduled_date, @subject, @comment_body,
+      @access_token, @refresh_token, @token_expires_at, @company_id,
+      'pending', @created_at
+    )
+    ON CONFLICT(plan_id, scheduled_date) DO UPDATE SET
+      project_id       = @project_id,
+      subject          = @subject,
+      comment_body     = @comment_body,
+      access_token     = @access_token,
+      refresh_token    = @refresh_token,
+      token_expires_at = @token_expires_at,
+      company_id       = @company_id,
+      status           = 'pending',
+      created_at       = @created_at,
+      posted_at        = NULL,
+      error            = NULL
+  `),
+
+  getByDate: db.prepare(
+    `SELECT * FROM pending_procore_notes WHERE scheduled_date = ? AND status = 'pending'`
+  ),
+
+  getAll: db.prepare(
+    `SELECT * FROM pending_procore_notes ORDER BY scheduled_date ASC, created_at DESC`
+  ),
+
+  markPosted: db.prepare(
+    `UPDATE pending_procore_notes SET status = 'posted', posted_at = ? WHERE id = ?`
+  ),
+
+  markFailed: db.prepare(
+    `UPDATE pending_procore_notes SET status = 'failed', error = ? WHERE id = ?`
+  ),
+
+  updateTokens: db.prepare(
+    `UPDATE pending_procore_notes SET access_token = ?, refresh_token = ?, token_expires_at = ? WHERE id = ?`
+  ),
+
+  deleteById: db.prepare(`DELETE FROM pending_procore_notes WHERE id = ?`),
+};
+
+export function insertPendingNote(note: Omit<PendingNoteRow, 'id' | 'status' | 'posted_at' | 'error'>): number {
+  const result = pendingStmts.insert.run(note);
+  return Number(result.lastInsertRowid);
+}
+
+export function getPendingNotesByDate(date: string): PendingNoteRow[] {
+  return pendingStmts.getByDate.all(date) as PendingNoteRow[];
+}
+
+export function getAllPendingNotes(): PendingNoteRow[] {
+  return pendingStmts.getAll.all() as PendingNoteRow[];
+}
+
+export function markNotePosted(id: number): void {
+  pendingStmts.markPosted.run(new Date().toISOString(), id);
+}
+
+export function markNoteFailed(id: number, error: string): void {
+  pendingStmts.markFailed.run(error, id);
+}
+
+export function updateNoteTokens(id: number, accessToken: string, refreshToken: string, expiresAt: number): void {
+  pendingStmts.updateTokens.run(accessToken, refreshToken, expiresAt, id);
+}
+
+export function deletePendingNote(id: number): boolean {
+  const result = pendingStmts.deleteById.run(id);
+  return result.changes > 0;
 }
 
 export default db;

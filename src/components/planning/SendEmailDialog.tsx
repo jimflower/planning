@@ -6,7 +6,8 @@ import { buildEmailSubject, buildEmailHtml } from '@/services/emailTemplate';
 import { usePlanningStore } from '@/store/planningStore';
 import { useEmailLogStore } from '@/store/emailLogStore';
 import { useProcoreData } from '@/hooks/useProcoreData';
-import { procoreService } from '@/services/procore.service';
+import { procoreService, buildDailyLogComment } from '@/services/procore.service';
+import { procoreConfig } from '@/config/procoreConfig';
 import { uuid } from '@/lib/utils/dateHelpers';
 import type { PlanningEmail } from '@/types/planning.types';
 import type { EmailLogEntry } from '@/types/email.types';
@@ -28,7 +29,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
   const [toField, setToField] = useState('');
   const [ccField, setCcField] = useState(ALWAYS_CC);
   const [subject, setSubject] = useState('');
-  const [procoreStatus, setProcoreStatus] = useState<'idle' | 'posting' | 'success' | 'failed' | 'future'>('idle');
+  const [procoreStatus, setProcoreStatus] = useState<'idle' | 'posting' | 'success' | 'failed' | 'scheduled'>('idle');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
@@ -177,22 +178,49 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
     );
     if (!project) return;
 
-    // Procore won't accept notes for future dates — use today if the plan date is in the future
     const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const isFuture = p.date > today;
-    const logDate = isFuture ? today : p.date;
-    const noteSubject = isFuture
-      ? `${subj} (planned for ${p.date})`
-      : subj;
 
-    setProcoreStatus(isFuture ? 'future' : 'posting');
-    try {
-      await procoreService.createDailyLogNote(project.id, logDate, noteSubject, p);
-      setProcoreStatus('success');
-      console.log('[Procore] Daily log note created for project', project.id, 'date', logDate);
-    } catch (err) {
-      setProcoreStatus('failed');
-      console.warn('[Procore] Failed to create daily log note:', err);
+    if (isFuture) {
+      // Queue for the cron job to post on the scheduled date
+      setProcoreStatus('posting');
+      try {
+        const commentBody = buildDailyLogComment(subj, p);
+        const tokens = JSON.parse(localStorage.getItem('procore_tokens') ?? '{}');
+
+        await fetch('/api/pending-notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            planId: p.id,
+            projectId: project.id,
+            scheduledDate: p.date,
+            subject: subj,
+            commentBody,
+            accessToken: tokens.access_token ?? '',
+            refreshToken: tokens.refresh_token ?? '',
+            tokenExpiresAt: tokens.expires_at ?? 0,
+            companyId: procoreConfig.companyId,
+          }),
+        });
+
+        setProcoreStatus('scheduled');
+        console.log('[Procore] Queued daily log note for', p.date, 'on project', project.id);
+      } catch (err) {
+        setProcoreStatus('failed');
+        console.warn('[Procore] Failed to queue daily log note:', err);
+      }
+    } else {
+      // Post immediately for today or past dates
+      setProcoreStatus('posting');
+      try {
+        await procoreService.createDailyLogNote(project.id, p.date, subj, p);
+        setProcoreStatus('success');
+        console.log('[Procore] Daily log note created for project', project.id, 'date', p.date);
+      } catch (err) {
+        setProcoreStatus('failed');
+        console.warn('[Procore] Failed to create daily log note:', err);
+      }
     }
   };
 
@@ -315,9 +343,9 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
               ✅ Email sent &amp; Procore daily log note created
             </div>
           )}
-          {procoreStatus === 'future' && (
-            <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
-              ✅ Email sent &amp; Procore note posted to today&apos;s log (future dates not supported by Procore)
+          {procoreStatus === 'scheduled' && (
+            <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+              📅 Email sent &amp; Procore note scheduled — will auto-post at 00:01 AM on {plan.date}
             </div>
           )}
           {procoreStatus === 'failed' && (

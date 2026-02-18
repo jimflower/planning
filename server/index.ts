@@ -13,8 +13,14 @@
  */
 import express from 'express';
 import cors from 'cors';
-import { getAllPlans, getPlanById, upsertPlan, deletePlan, bulkUpsert } from './db.js';
-import type { PlanRow } from './db.js';
+import cron from 'node-cron';
+import axios from 'axios';
+import {
+  getAllPlans, getPlanById, upsertPlan, deletePlan, bulkUpsert,
+  insertPendingNote, getAllPendingNotes, getPendingNotesByDate,
+  markNotePosted, markNoteFailed, updateNoteTokens, deletePendingNote,
+} from './db.js';
+import type { PlanRow, PendingNoteRow } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -161,6 +167,179 @@ app.post('/api/plans/sync', (req, res) => {
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+/* ── Pending Procore Notes endpoints ───────────────── */
+
+// Queue a future-date Procore note
+app.post('/api/pending-notes', (req, res) => {
+  try {
+    const body = req.body as {
+      planId: string;
+      projectId: number;
+      scheduledDate: string;
+      subject: string;
+      commentBody: string;
+      accessToken: string;
+      refreshToken: string;
+      tokenExpiresAt: number;
+      companyId: string;
+    };
+
+    if (!body.planId || !body.projectId || !body.scheduledDate || !body.accessToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const id = insertPendingNote({
+      plan_id: body.planId,
+      project_id: body.projectId,
+      scheduled_date: body.scheduledDate,
+      subject: body.subject ?? '',
+      comment_body: body.commentBody ?? '',
+      access_token: body.accessToken,
+      refresh_token: body.refreshToken,
+      token_expires_at: body.tokenExpiresAt,
+      company_id: body.companyId ?? '',
+      created_at: new Date().toISOString(),
+    });
+
+    console.log(`[API] Queued pending Procore note #${id} for ${body.scheduledDate} (plan ${body.planId})`);
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('[API] POST /api/pending-notes error:', err);
+    res.status(500).json({ error: 'Failed to queue pending note' });
+  }
+});
+
+// List all pending notes
+app.get('/api/pending-notes', (_req, res) => {
+  try {
+    res.json(getAllPendingNotes());
+  } catch (err) {
+    console.error('[API] GET /api/pending-notes error:', err);
+    res.status(500).json({ error: 'Failed to retrieve pending notes' });
+  }
+});
+
+// Delete a pending note
+app.delete('/api/pending-notes/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const deleted = deletePendingNote(id);
+    if (!deleted) return res.status(404).json({ error: 'Pending note not found' });
+    console.log(`[API] Deleted pending note #${id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[API] DELETE /api/pending-notes/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete pending note' });
+  }
+});
+
+/* ── Procore cron job: posts pending notes at 00:01 AM ─ */
+
+const PROCORE_TOKEN_URL = 'https://login.procore.com/oauth/token';
+const PROCORE_API_BASE = 'https://api.procore.com';
+const PROCORE_CLIENT_ID = process.env.VITE_PROCORE_CLIENT_ID ?? '';
+const PROCORE_CLIENT_SECRET = process.env.VITE_PROCORE_CLIENT_SECRET ?? '';
+
+/**
+ * Refresh Procore tokens if they're about to expire (< 5 min remaining).
+ * Updates the DB row with the new tokens.
+ */
+async function ensureFreshTokens(note: PendingNoteRow): Promise<{ accessToken: string; refreshToken: string; expiresAt: number }> {
+  const FIVE_MINS = 5 * 60 * 1000;
+
+  if (note.token_expires_at - Date.now() > FIVE_MINS) {
+    return { accessToken: note.access_token, refreshToken: note.refresh_token, expiresAt: note.token_expires_at };
+  }
+
+  console.log(`[Cron] Refreshing Procore token for pending note #${note.id}…`);
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: PROCORE_CLIENT_ID,
+    client_secret: PROCORE_CLIENT_SECRET,
+    refresh_token: note.refresh_token,
+  });
+
+  const resp = await axios.post(PROCORE_TOKEN_URL, body, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+
+  const { access_token, refresh_token, expires_in } = resp.data;
+  const newRefresh = refresh_token ?? note.refresh_token;
+  const newExpires = Date.now() + expires_in * 1000;
+
+  updateNoteTokens(note.id, access_token, newRefresh, newExpires);
+  return { accessToken: access_token, refreshToken: newRefresh, expiresAt: newExpires };
+}
+
+/**
+ * Post a single pending note to Procore's notes_logs endpoint.
+ */
+async function postPendingNote(note: PendingNoteRow): Promise<void> {
+  const { accessToken } = await ensureFreshTokens(note);
+
+  const url = `${PROCORE_API_BASE}/rest/v1.0/projects/${note.project_id}/notes_logs`;
+  await axios.post(
+    url,
+    {
+      notes_log: {
+        date: note.scheduled_date,
+        comment: note.comment_body,
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...(note.company_id ? { 'Procore-Company-Id': note.company_id } : {}),
+      },
+    },
+  );
+}
+
+/**
+ * Process all pending notes for today's date.
+ */
+async function processPendingNotes(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const notes = getPendingNotesByDate(today);
+
+  if (notes.length === 0) return;
+
+  console.log(`[Cron] Processing ${notes.length} pending Procore note(s) for ${today}…`);
+
+  for (const note of notes) {
+    try {
+      await postPendingNote(note);
+      markNotePosted(note.id);
+      console.log(`[Cron] ✅ Posted note #${note.id} (plan ${note.plan_id}) to project ${note.project_id}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      markNoteFailed(note.id, message);
+      console.error(`[Cron] ❌ Failed note #${note.id}:`, message);
+    }
+  }
+}
+
+// Schedule: every day at 00:01 AM
+cron.schedule('1 0 * * *', async () => {
+  console.log(`\n[Cron] ⏰ Running scheduled Procore note posting at ${new Date().toISOString()}`);
+  try {
+    await processPendingNotes();
+  } catch (err) {
+    console.error('[Cron] Unexpected error:', err);
+  }
+});
+
+// Also process on server startup (catches any missed notes from server downtime)
+setTimeout(async () => {
+  console.log('[Cron] Checking for any pending notes on startup…');
+  try {
+    await processPendingNotes();
+  } catch (err) {
+    console.error('[Cron] Startup check error:', err);
+  }
+}, 5000);
 
 /* ── Start ─────────────────────────────────────────── */
 app.listen(PORT, () => {

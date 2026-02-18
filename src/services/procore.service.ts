@@ -94,6 +94,80 @@ function getApi() {
   return api;
 }
 
+/* ── Shared helpers ───────────────────────────────── */
+
+/**
+ * Build the plain-text body that goes into a Procore daily-log note.
+ * Exported so the SendEmailDialog can pre-render it for queued (future-date) notes.
+ */
+export function buildDailyLogComment(
+  subject: string,
+  plan: {
+    projectNumber?: string;
+    subjobCode?: string;
+    client?: string;
+    location?: string;
+    weather?: string;
+    crewAssignments?: Array<{
+      name?: string;
+      roles?: string[];
+      startTime?: string;
+      startPoint?: string;
+      plant?: string;
+    }>;
+    qaRequirements?: Array<{
+      item: string;
+      completed?: boolean;
+      assignedTo?: string;
+      tool?: string;
+    }>;
+    plannedWork?: string;
+    materials?: string;
+    notes?: string;
+  },
+): string {
+  const lines: string[] = [`📋 ${subject}`, ''];
+  if (plan.projectNumber) lines.push(`Project: ${plan.projectNumber}`);
+  if (plan.subjobCode) lines.push(`Sub Job: ${plan.subjobCode}`);
+  if (plan.client) lines.push(`Client: ${plan.client}`);
+  if (plan.location) lines.push(`Location: ${plan.location}`);
+  if (plan.weather) lines.push(`Weather: ${plan.weather}`);
+
+  if (plan.crewAssignments?.length) {
+    const activeCrew = plan.crewAssignments.filter((c) => c.name?.trim());
+    if (activeCrew.length) {
+      lines.push('', '👷 Crew:');
+      activeCrew.forEach((c) => {
+        const roles = c.roles?.length ? ` (${c.roles.join(', ')})` : '';
+        const detail = [c.startTime, c.startPoint, c.plant].filter(Boolean).join(' | ');
+        lines.push(`  • ${c.name}${roles}${detail ? ` — ${detail}` : ''}`);
+      });
+    }
+  }
+
+  if (plan.qaRequirements?.length) {
+    lines.push('', '✅ QA Requirements:');
+    plan.qaRequirements.forEach((qa) => {
+      const status = qa.completed ? '✓' : '○';
+      lines.push(`  ${status} ${qa.item}${qa.assignedTo ? ` → ${qa.assignedTo}` : ''}${qa.tool ? ` (${qa.tool})` : ''}`);
+    });
+  }
+
+  if (plan.plannedWork) {
+    lines.push('', '🔧 Planned Work:', plan.plannedWork);
+  }
+
+  if (plan.materials) {
+    lines.push('', '📦 Materials:', plan.materials);
+  }
+
+  if (plan.notes) {
+    lines.push('', '📝 Notes:', plan.notes);
+  }
+
+  return lines.join('\n');
+}
+
 /* ── Public service ───────────────────────────────── */
 export const procoreService = {
   /* ── Config check ─────────────────────── */
@@ -477,47 +551,7 @@ export const procoreService = {
       notes?: string;
     },
   ): Promise<void> {
-    // Build a plain-text body summarising the plan
-    const lines: string[] = [`📋 ${subject}`, ''];
-    if (plan.projectNumber) lines.push(`Project: ${plan.projectNumber}`);
-    if (plan.subjobCode) lines.push(`Sub Job: ${plan.subjobCode}`);
-    if (plan.client) lines.push(`Client: ${plan.client}`);
-    if (plan.location) lines.push(`Location: ${plan.location}`);
-    if (plan.weather) lines.push(`Weather: ${plan.weather}`);
-
-    if (plan.crewAssignments?.length) {
-      const activeCrew = plan.crewAssignments.filter((c) => c.name?.trim());
-      if (activeCrew.length) {
-        lines.push('', '👷 Crew:');
-        activeCrew.forEach((c) => {
-          const roles = c.roles?.length ? ` (${c.roles.join(', ')})` : '';
-          const detail = [c.startTime, c.startPoint, c.plant].filter(Boolean).join(' | ');
-          lines.push(`  • ${c.name}${roles}${detail ? ` — ${detail}` : ''}`);
-        });
-      }
-    }
-
-    if (plan.qaRequirements?.length) {
-      lines.push('', '✅ QA Requirements:');
-      plan.qaRequirements.forEach((qa) => {
-        const status = qa.completed ? '✓' : '○';
-        lines.push(`  ${status} ${qa.item}${qa.assignedTo ? ` → ${qa.assignedTo}` : ''}${qa.tool ? ` (${qa.tool})` : ''}`);
-      });
-    }
-
-    if (plan.plannedWork) {
-      lines.push('', '🔧 Planned Work:', plan.plannedWork);
-    }
-
-    if (plan.materials) {
-      lines.push('', '📦 Materials:', plan.materials);
-    }
-
-    if (plan.notes) {
-      lines.push('', '📝 Notes:', plan.notes);
-    }
-
-    const body = lines.join('\n');
+    const body = buildDailyLogComment(subject, plan);
 
     // POST to notes_logs endpoint
     const url = `/rest/v1.0/projects/${projectId}/notes_logs`;
