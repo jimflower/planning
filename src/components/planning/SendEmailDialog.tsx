@@ -28,6 +28,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
   const [toField, setToField] = useState('');
   const [ccField, setCcField] = useState(ALWAYS_CC);
   const [subject, setSubject] = useState('');
+  const [procoreStatus, setProcoreStatus] = useState<'idle' | 'posting' | 'success' | 'failed' | 'future'>('idle');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
@@ -38,6 +39,7 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
   useEffect(() => {
     if (!open) return;
     setError('');
+    setProcoreStatus('idle');
     setSubject(buildEmailSubject(plan));
     authService.getCurrentUser().then(setUser);
 
@@ -134,12 +136,11 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
       addLog(logEntry);
 
       if (result.success) {
-        // Post to Procore daily log in background
-        postToProcoreDailyLog(plan, subject).catch((err) =>
-          console.warn('[Procore] Daily log note failed:', err),
-        );
+        // Post to Procore daily log — keep dialog open briefly to show result
+        await postToProcoreDailyLog(plan, subject);
         onSent();
-        onClose();
+        // Small delay so user sees the Procore status
+        setTimeout(() => onClose(), 1500);
       } else {
         setError(result.error ?? 'Failed to send email.');
       }
@@ -175,10 +176,22 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
       (pr) => pr.project_number === p.projectNumber || pr.name === p.projectNumber,
     );
     if (!project) return;
+
+    // Procore won't accept notes for future dates — use today if the plan date is in the future
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const isFuture = p.date > today;
+    const logDate = isFuture ? today : p.date;
+    const noteSubject = isFuture
+      ? `${subj} (planned for ${p.date})`
+      : subj;
+
+    setProcoreStatus(isFuture ? 'future' : 'posting');
     try {
-      await procoreService.createDailyLogNote(project.id, p.date, subj, p);
-      console.log('[Procore] Daily log note created for project', project.id);
+      await procoreService.createDailyLogNote(project.id, logDate, noteSubject, p);
+      setProcoreStatus('success');
+      console.log('[Procore] Daily log note created for project', project.id, 'date', logDate);
     } catch (err) {
+      setProcoreStatus('failed');
       console.warn('[Procore] Failed to create daily log note:', err);
     }
   };
@@ -287,6 +300,29 @@ export function SendEmailDialog({ open, onClose, onSent }: Props) {
           {error && (
             <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-300">
               {error}
+            </div>
+          )}
+
+          {/* Procore daily log status */}
+          {procoreStatus === 'posting' && (
+            <div className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Posting to Procore daily log…
+            </div>
+          )}
+          {procoreStatus === 'success' && (
+            <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
+              ✅ Email sent &amp; Procore daily log note created
+            </div>
+          )}
+          {procoreStatus === 'future' && (
+            <div className="rounded-lg bg-green-50 p-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
+              ✅ Email sent &amp; Procore note posted to today&apos;s log (future dates not supported by Procore)
+            </div>
+          )}
+          {procoreStatus === 'failed' && (
+            <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+              ⚠️ Email sent but Procore daily log note failed — check project permissions
             </div>
           )}
         </div>
