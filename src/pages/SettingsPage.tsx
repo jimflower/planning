@@ -20,6 +20,7 @@ export default function SettingsPage() {
 
   const msalConfigured = authService.isConfigured();
   const [msalUser, setMsalUser] = useState<AuthUser | null>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'manager' | 'user'>('user');
 
   // Procore users for exclusion settings
   const [procoreUsers, setProcoreUsers] = useState<ProcoreUser[]>([]);
@@ -27,7 +28,16 @@ export default function SettingsPage() {
   const [savingExclusion, setSavingExclusion] = useState(false);
 
   useEffect(() => {
-    authService.getCurrentUser().then(setMsalUser);
+    authService.getCurrentUser().then((user) => {
+      setMsalUser(user);
+      // Fetch user role from server
+      if (user?.email) {
+        fetch(`/api/user-role/${encodeURIComponent(user.email)}`)
+          .then((res) => res.json())
+          .then((data) => setUserRole(data.role || 'user'))
+          .catch(() => setUserRole('user'));
+      }
+    });
     // Load excluded users from server
     loadFromServer();
   }, [loadFromServer]);
@@ -88,12 +98,23 @@ export default function SettingsPage() {
               </p>
               <p className="text-xs text-blue-700 dark:text-blue-300">{msalUser.email}</p>
             </div>
-            <div className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800 dark:bg-blue-800 dark:text-blue-200">
-              User Role: <span className="capitalize">user</span>
+            <div className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              userRole === 'admin' 
+                ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200'
+                : userRole === 'manager'
+                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200' 
+                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+            }`}>
+              {userRole === 'admin' && '👑 '}
+              {userRole === 'manager' && '⭐ '}
+              Role: <span className="capitalize">{userRole}</span>
             </div>
           </div>
           <p className="mt-2 text-xs text-blue-600 dark:text-blue-400">
-            💡 Global settings like excluded users are shared across all users. Contact an admin to change your role.
+            💡 Global settings like excluded users are shared across all users.
+            {userRole === 'user' && ' Contact an admin to change your role.'}
+            {userRole === 'manager' && ' You can modify global settings.'}
+            {userRole === 'admin' && ' You have full administrative access.'}
           </p>
         </div>
       )}
