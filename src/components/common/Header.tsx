@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { cn } from '@/lib/utils/cn';
@@ -18,6 +18,7 @@ import {
   LogOut,
   User,
   ClipboardList,
+  Shield,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -28,21 +29,37 @@ const NAV_ITEMS = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
+const ADMIN_NAV_ITEMS = [
+  { to: '/users', label: 'Users', icon: Shield },
+];
+
 export function Header() {
   const location = useLocation();
   const online = useOnlineStatus();
   const { darkMode, toggleDarkMode } = useSettingsStore();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const { instance, accounts } = useMsal();
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const activeAccount = accounts[0];
   const displayName = activeAccount?.name ?? activeAccount?.username ?? '';
+  const userEmail = activeAccount?.username ?? '';
   const initials = displayName
     .split(' ')
     .map((w) => w[0])
     .join('')
     .slice(0, 2)
     .toUpperCase();
+
+  // Check if user is admin
+  useEffect(() => {
+    if (userEmail) {
+      fetch(`/api/user-role/${encodeURIComponent(userEmail)}`)
+        .then((res) => res.json())
+        .then((data) => setIsAdmin(data.role === 'admin'))
+        .catch(() => setIsAdmin(false));
+    }
+  }, [userEmail]);
 
   const handleSignOut = () => {
     instance.logoutPopup({ account: activeAccount });
@@ -60,6 +77,21 @@ export function Header() {
         {/* Desktop nav */}
         <nav className="hidden items-center gap-1 md:flex">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+            <Link
+              key={to}
+              to={to}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                location.pathname === to
+                  ? 'bg-white/20'
+                  : 'hover:bg-white/10',
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Link>
+          ))}
+          {isAdmin && ADMIN_NAV_ITEMS.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
@@ -134,6 +166,20 @@ export function Header() {
       {mobileOpen && (
         <nav className="border-t border-white/10 md:hidden">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+            <Link
+              key={to}
+              to={to}
+              onClick={() => setMobileOpen(false)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors',
+                location.pathname === to ? 'bg-white/20' : 'hover:bg-white/10',
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </Link>
+          ))}
+          {isAdmin && ADMIN_NAV_ITEMS.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}

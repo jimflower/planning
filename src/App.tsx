@@ -14,6 +14,7 @@ import DashboardPage from '@/pages/DashboardPage';
 import HistoryPage from '@/pages/HistoryPage';
 import EmailHistoryPage from '@/pages/EmailHistoryPage';
 import SettingsPage from '@/pages/SettingsPage';
+import UserManagementPage from '@/pages/UserManagementPage';
 import ProcoreCallbackPage from '@/pages/ProcoreCallbackPage';
 
 export default function App() {
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/email-history" element={<EmailHistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/users" element={<UserManagementPage />} />
           <Route path="/procore/callback" element={<ProcoreCallbackPage />} />
         </Routes>
         <OfflineIndicator />
