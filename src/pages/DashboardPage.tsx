@@ -101,7 +101,8 @@ export default function DashboardPage() {
   useEffect(() => {
     if (procoreService.isAuthenticated()) {
       setLoadingInspections(true);
-      procoreService.getInspectionsByTemplate('Daily Crew Prestart')
+      // Template ID 562949960271767 = Daily Crew Prestart template
+      procoreService.getInspectionsByTemplate(undefined, 562949960271767)
         .then((inspections) => {
           console.log(`[Dashboard] Found ${inspections.length} Daily Crew Prestart inspections`);
           
@@ -111,6 +112,7 @@ export default function DashboardPage() {
               id: inspections[0].id,
               name: inspections[0].name,
               template: inspections[0].inspection_template?.name,
+              template_id: inspections[0].inspection_template?.id,
               status: inspections[0].status,
               date: inspections[0].inspection_date,
               project_id: inspections[0].project?.id

@@ -603,8 +603,8 @@ export const procoreService = {
   },
 
   /** Get inspections for a project with optional template filter */
-  async getProjectInspections(projectId: number, templateName?: string): Promise<ProcoreInspection[]> {
-    const cacheKey = `inspections_${projectId}_${templateName || 'all'}`;
+  async getProjectInspections(projectId: number, templateName?: string, templateId?: number): Promise<ProcoreInspection[]> {
+    const cacheKey = `inspections_${projectId}_${templateName || 'all'}_${templateId || 'all'}`;
     const cached = getCached<ProcoreInspection[]>(cacheKey);
     if (cached) return cached;
 
@@ -613,8 +613,12 @@ export const procoreService = {
       const resp = await getApi().get(url, { params: { per_page: 200 } });
       let inspections = resp.data as ProcoreInspection[];
 
-      // Filter by template name if provided
-      if (templateName) {
+      // Filter by template ID if provided (takes priority)
+      if (templateId) {
+        inspections = inspections.filter(i => i.inspection_template?.id === templateId);
+      }
+      // Otherwise filter by template name if provided
+      else if (templateName) {
         inspections = inspections.filter(i => 
           i.inspection_template?.name?.toLowerCase().includes(templateName.toLowerCase())
         );
@@ -632,16 +636,17 @@ export const procoreService = {
     }
   },
 
-  /** Get all inspections across active projects matching a template name */
-  async getInspectionsByTemplate(templateName: string): Promise<ProcoreInspection[]> {
-    const cacheKey = `inspections_template_${templateName}`;
+  /** Get all inspections across active projects matching a template ID or name */
+  async getInspectionsByTemplate(templateName?: string, templateId?: number): Promise<ProcoreInspection[]> {
+    const cacheKey = `inspections_template_${templateName || 'all'}_${templateId || 'all'}`;
     const cached = getCached<ProcoreInspection[]>(cacheKey);
     if (cached) return cached;
 
     // Get active projects first
     const projects = await this.getProjects();
     const activeProjects = projects.filter(p => p.active);
-    console.log(`[Procore] Searching ${activeProjects.length} active projects for inspections with template: "${templateName}"`);
+    const searchCriteria = templateId ? `template ID: ${templateId}` : `template name: "${templateName}"`;
+    console.log(`[Procore] Searching ${activeProjects.length} active projects for inspections with ${searchCriteria}`);
 
     // Fetch inspections for each active project (silently skip projects without inspections)
     const allInspections: ProcoreInspection[] = [];
@@ -649,13 +654,13 @@ export const procoreService = {
     
     for (const project of activeProjects) {
       try {
-        const inspections = await this.getProjectInspections(project.id, templateName);
+        const inspections = await this.getProjectInspections(project.id, templateName, templateId);
         allInspections.push(...inspections);
         
         // Track unique template names for debugging
         inspections.forEach(i => {
           if (i.inspection_template?.name) {
-            uniqueTemplates.add(i.inspection_template.name);
+            uniqueTemplates.add(`${i.inspection_template.name} (ID: ${i.inspection_template.id})`);
           }
         });
       } catch (err: any) {
@@ -666,9 +671,9 @@ export const procoreService = {
       }
     }
 
-    console.log(`[Procore] Found ${allInspections.length} inspections matching "${templateName}"`);
+    console.log(`[Procore] Found ${allInspections.length} inspections matching ${searchCriteria}`);
     if (uniqueTemplates.size > 0) {
-      console.log('[Procore] Matching template names:', Array.from(uniqueTemplates));
+      console.log('[Procore] Matching templates:', Array.from(uniqueTemplates));
     }
 
     setCache(cacheKey, allInspections);
