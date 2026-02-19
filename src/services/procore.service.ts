@@ -13,7 +13,7 @@
  */
 import axios, { type AxiosInstance } from 'axios';
 import { procoreConfig } from '@/config/procoreConfig';
-import type { ProcoreUser, EquipmentItem, ProcoreProject, ProcorePrimeContract } from '@/types/procore.types';
+import type { ProcoreUser, EquipmentItem, ProcoreProject, ProcorePrimeContract, ProcoreInspection } from '@/types/procore.types';
 
 /* ── Token management ─────────────────────────────── */
 interface TokenData {
@@ -600,6 +600,52 @@ export const procoreService = {
         comment: body,
       },
     });
+  },
+
+  /** Get inspections for a project with optional template filter */
+  async getProjectInspections(projectId: number, templateName?: string): Promise<ProcoreInspection[]> {
+    const cacheKey = `inspections_${projectId}_${templateName || 'all'}`;
+    const cached = getCached<ProcoreInspection[]>(cacheKey);
+    if (cached) return cached;
+
+    const url = `/rest/v1.0/projects/${projectId}/inspections`;
+    const resp = await getApi().get(url, { params: { per_page: 200 } });
+    let inspections = resp.data as ProcoreInspection[];
+
+    // Filter by template name if provided
+    if (templateName) {
+      inspections = inspections.filter(i => 
+        i.inspection_template?.name?.toLowerCase().includes(templateName.toLowerCase())
+      );
+    }
+
+    setCache(cacheKey, inspections);
+    return inspections;
+  },
+
+  /** Get all inspections across active projects matching a template name */
+  async getInspectionsByTemplate(templateName: string): Promise<ProcoreInspection[]> {
+    const cacheKey = `inspections_template_${templateName}`;
+    const cached = getCached<ProcoreInspection[]>(cacheKey);
+    if (cached) return cached;
+
+    // Get active projects first
+    const projects = await this.getProjects();
+    const activeProjects = projects.filter(p => p.active);
+
+    // Fetch inspections for each active project
+    const allInspections: ProcoreInspection[] = [];
+    for (const project of activeProjects) {
+      try {
+        const inspections = await this.getProjectInspections(project.id, templateName);
+        allInspections.push(...inspections);
+      } catch (err) {
+        console.warn(`[Procore] Failed to fetch inspections for project ${project.id}:`, err);
+      }
+    }
+
+    setCache(cacheKey, allInspections);
+    return allInspections;
   },
 
   /** Clear cached data (force re-fetch) */

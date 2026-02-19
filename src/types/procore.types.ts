@@ -81,6 +81,18 @@ export interface ProcorePrimeContract {
   [key: string]: unknown;
 }
 
+export interface ProcoreInspection {
+  id: number;
+  number: string;
+  name: string;
+  status: string;
+  inspection_date?: string;
+  project: { id: number; name: string };
+  inspection_template: { id: number; name: string };
+  created_at: string;
+  updated_at: string;
+}
+
 export enum ProcoreErrorType {
   AUTHENTICATION = 'auth_error',
   NETWORK = 'network_error',

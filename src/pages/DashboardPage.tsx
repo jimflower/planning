@@ -3,7 +3,7 @@ import { useEmailLogStore } from '@/store/emailLogStore';
 import { usePlanningStore } from '@/store/planningStore';
 import { useExcludedUsersStore } from '@/store/excludedUsersStore';
 import { procoreService } from '@/services/procore.service';
-import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen, Clock, CheckCircle2, XCircle, Trash2, Loader2, UserCheck, UserX } from 'lucide-react';
+import { Mail, Send, AlertTriangle, ClipboardList, Users, FolderOpen, Clock, CheckCircle2, XCircle, Trash2, Loader2, UserCheck, UserX, CheckSquare } from 'lucide-react';
 
 function formatDDMMYYYY(iso: string): string {
   try {
@@ -94,6 +94,28 @@ export default function DashboardPage() {
     }
   };
 
+  // Daily Crew Prestart inspections
+  const [dailyPrestartCount, setDailyPrestartCount] = useState(0);
+  const [loadingInspections, setLoadingInspections] = useState(true);
+
+  useEffect(() => {
+    if (procoreService.isAuthenticated()) {
+      setLoadingInspections(true);
+      procoreService.getInspectionsByTemplate('Daily Crew Prestart')
+        .then((inspections) => {
+          console.log(`[Dashboard] Found ${inspections.length} Daily Crew Prestart inspections`);
+          setDailyPrestartCount(inspections.length);
+          setLoadingInspections(false);
+        })
+        .catch((err) => {
+          console.error('[Dashboard] Failed to fetch inspections:', err);
+          setLoadingInspections(false);
+        });
+    } else {
+      setLoadingInspections(false);
+    }
+  }, []);
+
   const totalSent = logs.filter((l) => l.status === 'sent').length;
   const totalFailed = logs.filter((l) => l.status === 'failed').length;
   const totalPlans = history.length;
@@ -165,7 +187,7 @@ export default function DashboardPage() {
       <h1 className="mb-6 text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
 
       {/* Stat Cards */}
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-5">
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           icon={<ClipboardList className="h-6 w-6" />}
           label="Total Plans"
@@ -195,6 +217,12 @@ export default function DashboardPage() {
           label="Scheduled"
           value={pendingNotes.filter((n) => n.status === 'pending').length}
           colour="primary"
+        />
+        <StatCard
+          icon={<CheckSquare className="h-6 w-6" />}
+          label="Daily Prestarts"
+          value={dailyPrestartCount}
+          colour="secondary"
         />
       </div>
 
