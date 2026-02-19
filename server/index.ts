@@ -669,7 +669,13 @@ async function postPendingNote(note: PendingNoteRow): Promise<void> {
  * Process all pending notes for today's date.
  */
 async function processPendingNotes(): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  // Get today's date in server's local timezone (not UTC)
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const today = `${year}-${month}-${day}`; // YYYY-MM-DD in local timezone
+  
   const notes = getPendingNotesByDate(today);
 
   if (notes.length === 0) return;
@@ -708,6 +714,18 @@ setTimeout(async () => {
     console.error('[Cron] Startup check error:', err);
   }
 }, 5000);
+
+// Manual trigger for processing pending notes (testing/debugging)
+app.post('/api/process-pending-notes', async (req, res) => {
+  try {
+    console.log('[API] Manual trigger for processing pending notes');
+    await processPendingNotes();
+    res.json({ success: true, message: 'Pending notes processed' });
+  } catch (err) {
+    console.error('[API] POST /api/process-pending-notes error:', err);
+    res.status(500).json({ error: 'Failed to process pending notes' });
+  }
+});
 
 /* ── Serve built frontend (production) ──────────────── */
 import fs from 'node:fs';
