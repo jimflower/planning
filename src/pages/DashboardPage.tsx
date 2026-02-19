@@ -104,6 +104,19 @@ export default function DashboardPage() {
       procoreService.getInspectionsByTemplate('Daily Crew Prestart')
         .then((inspections) => {
           console.log(`[Dashboard] Found ${inspections.length} Daily Crew Prestart inspections`);
+          
+          // Log sample inspection details for debugging
+          if (inspections.length > 0) {
+            console.log('[Dashboard] Sample inspection:', {
+              id: inspections[0].id,
+              name: inspections[0].name,
+              template: inspections[0].inspection_template?.name,
+              status: inspections[0].status,
+              date: inspections[0].inspection_date,
+              project_id: inspections[0].project?.id
+            });
+          }
+          
           setDailyPrestartCount(inspections.length);
           setLoadingInspections(false);
         })

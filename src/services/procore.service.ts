@@ -641,19 +641,34 @@ export const procoreService = {
     // Get active projects first
     const projects = await this.getProjects();
     const activeProjects = projects.filter(p => p.active);
+    console.log(`[Procore] Searching ${activeProjects.length} active projects for inspections with template: "${templateName}"`);
 
     // Fetch inspections for each active project (silently skip projects without inspections)
     const allInspections: ProcoreInspection[] = [];
+    const uniqueTemplates = new Set<string>();
+    
     for (const project of activeProjects) {
       try {
         const inspections = await this.getProjectInspections(project.id, templateName);
         allInspections.push(...inspections);
+        
+        // Track unique template names for debugging
+        inspections.forEach(i => {
+          if (i.inspection_template?.name) {
+            uniqueTemplates.add(i.inspection_template.name);
+          }
+        });
       } catch (err: any) {
         // Only log unexpected errors (404s are already handled in getProjectInspections)
         if (err?.response?.status !== 404) {
           console.warn(`[Procore] Failed to fetch inspections for project ${project.id}:`, err.message);
         }
       }
+    }
+
+    console.log(`[Procore] Found ${allInspections.length} inspections matching "${templateName}"`);
+    if (uniqueTemplates.size > 0) {
+      console.log('[Procore] Matching template names:', Array.from(uniqueTemplates));
     }
 
     setCache(cacheKey, allInspections);
