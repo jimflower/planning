@@ -24,13 +24,10 @@ export function useProcoreData(projectId?: number) {
     promises.push(
       procoreService.getCompanyUsers()
         .then((all) => {
-          // Keep only direct employees (is_employee flag + no vendor, or vendor = GNB Energy)
-          const employees = all.filter((u) =>
-            u.is_employee !== false &&
-            (!u.vendor || /gnb energy/i.test(u.vendor.name)),
-          );
-          console.log(`[Procore] Loaded ${all.length} users, filtered to ${employees.length} GNB employees`);
-          setUsers(employees);
+          // API already filters for is_employee: true via params
+          // Just log and use all returned users
+          console.log(`[Procore] Loaded ${all.length} active employees from company directory`);
+          setUsers(all);
         })
         .catch((err) => console.error('[Procore] Failed to fetch users:', err)),
       procoreService.getEquipment()

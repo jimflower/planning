@@ -53,13 +53,9 @@ export default function SettingsPage() {
     if (procoreConnected) {
       setLoadingUsers(true);
       procoreService.getCompanyUsers()
-        .then((all) => {
-          // Filter to only GNB Energy employees (same filter as crew dropdowns)
-          const employees = all.filter((u) =>
-            u.is_employee !== false &&
-            (!u.vendor || /gnb energy/i.test(u.vendor.name)),
-          );
-          setProcoreUsers(employees);
+        .then((users) => {
+          // API already filters for active employees
+          setProcoreUsers(users);
           setLoadingUsers(false);
         })
         .catch(() => setLoadingUsers(false));
