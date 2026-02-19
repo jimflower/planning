@@ -608,19 +608,28 @@ export const procoreService = {
     const cached = getCached<ProcoreInspection[]>(cacheKey);
     if (cached) return cached;
 
-    const url = `/rest/v1.0/projects/${projectId}/inspections`;
-    const resp = await getApi().get(url, { params: { per_page: 200 } });
-    let inspections = resp.data as ProcoreInspection[];
+    try {
+      const url = `/rest/v1.0/projects/${projectId}/inspections`;
+      const resp = await getApi().get(url, { params: { per_page: 200 } });
+      let inspections = resp.data as ProcoreInspection[];
 
-    // Filter by template name if provided
-    if (templateName) {
-      inspections = inspections.filter(i => 
-        i.inspection_template?.name?.toLowerCase().includes(templateName.toLowerCase())
-      );
+      // Filter by template name if provided
+      if (templateName) {
+        inspections = inspections.filter(i => 
+          i.inspection_template?.name?.toLowerCase().includes(templateName.toLowerCase())
+        );
+      }
+
+      setCache(cacheKey, inspections);
+      return inspections;
+    } catch (err: any) {
+      // 404 means inspections not enabled for this project - return empty array silently
+      if (err?.response?.status === 404) {
+        return [];
+      }
+      // Log other errors
+      throw err;
     }
-
-    setCache(cacheKey, inspections);
-    return inspections;
   },
 
   /** Get all inspections across active projects matching a template name */
@@ -633,14 +642,17 @@ export const procoreService = {
     const projects = await this.getProjects();
     const activeProjects = projects.filter(p => p.active);
 
-    // Fetch inspections for each active project
+    // Fetch inspections for each active project (silently skip projects without inspections)
     const allInspections: ProcoreInspection[] = [];
     for (const project of activeProjects) {
       try {
         const inspections = await this.getProjectInspections(project.id, templateName);
         allInspections.push(...inspections);
-      } catch (err) {
-        console.warn(`[Procore] Failed to fetch inspections for project ${project.id}:`, err);
+      } catch (err: any) {
+        // Only log unexpected errors (404s are already handled in getProjectInspections)
+        if (err?.response?.status !== 404) {
+          console.warn(`[Procore] Failed to fetch inspections for project ${project.id}:`, err.message);
+        }
       }
     }
 
