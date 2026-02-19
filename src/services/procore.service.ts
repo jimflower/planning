@@ -524,9 +524,10 @@ export const procoreService = {
 
     const resp = await getApi().get(
       `/rest/v1.0/companies/${procoreConfig.companyId}/users`,
-      { params: { per_page: 300, 'filters[is_active]': true, 'filters[is_employee]': true } },
+      { params: { per_page: 500, 'filters[is_active]': true } },
     );
     const users = resp.data as ProcoreUser[];
+    console.log(`[Procore API] Retrieved ${users.length} active users from company directory`);
     setCache(cacheKey, users);
     return users;
   },

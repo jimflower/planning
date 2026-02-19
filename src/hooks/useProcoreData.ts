@@ -32,15 +32,32 @@ export function useProcoreData(projectId?: number) {
           );
           console.log(`[Procore] Loaded ${all.length} users, filtered to ${employees.length} GNB employees`);
           
-          // Debug: log filtered out users to find missing ones
-          const filtered = all.filter((u) => {
-            const keep = u.is_employee === true && (!u.vendor || /gnb/i.test(u.vendor.name));
-            return !keep;
-          });
-          if (filtered.length > 0) {
-            console.log(`[Procore] Filtered out ${filtered.length} non-GNB users:`, 
-              filtered.slice(0, 5).map(u => ({ name: u.name, is_employee: u.is_employee, vendor: u.vendor?.name }))
-            );
+          // Debug: Find Chris Fox and Trystan Eastham specifically
+          const chrisFox = all.find(u => /chris.*fox/i.test(u.name));
+          const trystanEastham = all.find(u => /trystan.*eastham/i.test(u.name));
+          
+          if (chrisFox) {
+            console.log('[Procore] Found Chris Fox:', {
+              id: chrisFox.id,
+              name: chrisFox.name,
+              is_employee: chrisFox.is_employee,
+              vendor: chrisFox.vendor?.name,
+              included: employees.some(e => e.id === chrisFox.id)
+            });
+          } else {
+            console.log('[Procore] Chris Fox NOT found in API response');
+          }
+          
+          if (trystanEastham) {
+            console.log('[Procore] Found Trystan Eastham:', {
+              id: trystanEastham.id,
+              name: trystanEastham.name,
+              is_employee: trystanEastham.is_employee,
+              vendor: trystanEastham.vendor?.name,
+              included: employees.some(e => e.id === trystanEastham.id)
+            });
+          } else {
+            console.log('[Procore] Trystan Eastham NOT found in API response');
           }
           
           setUsers(employees);
